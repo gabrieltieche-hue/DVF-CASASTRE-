@@ -1,0 +1,6 @@
+{
+  "name": "DVF Cadastre — Extraction Immobilière",
+  "description": "Extraction et analyse des transactions DVF (Demandes de Valeurs Foncières) par rayon géographique, typologie et surface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
