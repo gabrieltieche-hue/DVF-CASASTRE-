@@ -123,21 +123,36 @@ export function DvfCompareModal({
   const lumA = enrichA?.luminosity?.score ?? envA?.luminosity.score ?? null;
   const lumB = enrichB?.luminosity?.score ?? envB?.luminosity.score ?? null;
   const visA =
-    enrichA?.bdTopo?.principalVisAVisDistanceM ?? envA?.principalVisAVisM ?? null;
+    enrichA?.bdTopo?.effectiveVisAVisDistanceM ??
+    envA?.effectiveVisAVisM ??
+    enrichA?.bdTopo?.principalVisAVisDistanceM ??
+    envA?.principalVisAVisM ??
+    null;
   const visB =
-    enrichB?.bdTopo?.principalVisAVisDistanceM ?? envB?.principalVisAVisM ?? null;
+    enrichB?.bdTopo?.effectiveVisAVisDistanceM ??
+    envB?.effectiveVisAVisM ??
+    enrichB?.bdTopo?.principalVisAVisDistanceM ??
+    envB?.principalVisAVisM ??
+    null;
+  const rueA = enrichA?.bdTopo?.principalVisAVisDistanceM ?? envA?.principalVisAVisM ?? null;
+  const rueB = enrichB?.bdTopo?.principalVisAVisDistanceM ?? envB?.principalVisAVisM ?? null;
   const courA = enrichA?.bdTopo?.closestNeighborDistanceM ?? envA?.closestVisAVisM ?? null;
   const courB = enrichB?.bdTopo?.closestNeighborDistanceM ?? envB?.closestVisAVisM ?? null;
   const skyA = enrichA?.bdTopo?.skyOpennessPct ?? envA?.skyOpennessPct ?? null;
   const skyB = enrichB?.bdTopo?.skyOpennessPct ?? envB?.skyOpennessPct ?? null;
 
-  const formatVis = (princ: number | null, cour: number | null, loaded: boolean) => {
+  const formatVis = (
+    eff: number | null,
+    rue: number | null,
+    cour: number | null,
+    loaded: boolean
+  ) => {
     if (!loaded) return '—';
-    const mainStr = princ !== null ? `${princ} m` : '> 65 m (dégagé)';
-    if (cour !== null && (princ === null || cour < princ)) {
-      return `${mainStr} (cour ${cour} m)`;
-    }
-    return mainStr;
+    const base = eff !== null ? `${eff} m pondéré` : rue !== null ? `${rue} m` : '> 100 m (dégagé)';
+    const parts: string[] = [];
+    if (rue !== null && rue !== eff) parts.push(`rue ${rue} m`);
+    if (cour !== null && (rue === null || cour < rue)) parts.push(`cour ${cour} m`);
+    return parts.length > 0 ? `${base} (${parts.join(' · ')})` : base;
   };
 
   const rows: Array<{
@@ -215,14 +230,18 @@ export function DvfCompareModal({
       requiresEnrich: true,
     },
     {
-      label: 'Construction & gabarit (BDNB)',
+      label: 'Construction & gabarit (BDNB / IGN)',
       valA:
         loading && !enrichA
           ? 'Chargement…'
           : [
               enrichA?.bdnb?.constructionYear ?? 'Année n/c',
-              enrichA?.bdnb?.floors ? `${enrichA.bdnb.floors} niv.` : null,
-              enrichA?.bdTopo?.subjectHeightM ? `${enrichA.bdTopo.subjectHeightM} m` : null,
+              (enrichA?.bdnb?.floors ?? enrichA?.bdTopo?.subjectFloors)
+                ? `${enrichA?.bdnb?.floors ?? enrichA?.bdTopo?.subjectFloors} niv.`
+                : null,
+              (enrichA?.bdTopo?.subjectHeightM ?? enrichA?.bdnb?.meanHeightM)
+                ? `${enrichA?.bdTopo?.subjectHeightM ?? enrichA?.bdnb?.meanHeightM} m`
+                : null,
             ]
               .filter(Boolean)
               .join(' · '),
@@ -231,8 +250,12 @@ export function DvfCompareModal({
           ? 'Chargement…'
           : [
               enrichB?.bdnb?.constructionYear ?? 'Année n/c',
-              enrichB?.bdnb?.floors ? `${enrichB.bdnb.floors} niv.` : null,
-              enrichB?.bdTopo?.subjectHeightM ? `${enrichB.bdTopo.subjectHeightM} m` : null,
+              (enrichB?.bdnb?.floors ?? enrichB?.bdTopo?.subjectFloors)
+                ? `${enrichB?.bdnb?.floors ?? enrichB?.bdTopo?.subjectFloors} niv.`
+                : null,
+              (enrichB?.bdTopo?.subjectHeightM ?? enrichB?.bdnb?.meanHeightM)
+                ? `${enrichB?.bdTopo?.subjectHeightM ?? enrichB?.bdnb?.meanHeightM} m`
+                : null,
             ]
               .filter(Boolean)
               .join(' · '),
@@ -250,11 +273,11 @@ export function DvfCompareModal({
           : enrichB?.bdnb?.traversing || enrichB?.luminosity?.crossLightLabel || envB?.luminosity.crossLightLabel || '—',
     },
     {
-      label: 'Vis-à-vis façade principale / cour',
-      valA: formatVis(visA, courA, Boolean(enrichA || envA)),
-      valB: formatVis(visB, courB, Boolean(enrichB || envB)),
+      label: 'Vis-à-vis pondéré (rue / cour)',
+      valA: formatVis(visA, rueA, courA, Boolean(enrichA || envA)),
+      valB: formatVis(visB, rueB, courB, Boolean(enrichB || envB)),
       highlight:
-        (visA ?? 65) > (visB ?? 65) ? 'A' : (visB ?? 65) > (visA ?? 65) ? 'B' : null,
+        (visA ?? 100) > (visB ?? 100) ? 'A' : (visB ?? 100) > (visA ?? 100) ? 'B' : null,
     },
     {
       label: 'Dégagement ciel & Luminosité',

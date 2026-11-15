@@ -40,6 +40,7 @@ interface CachedSectorTopo {
   centerLat: number;
   centerLon: number;
   radiusMeters: number;
+  marginMeters: number;
   buildings: ParsedBdTopoBuilding[];
   vegetation: ParsedVegetationZone[];
 }
@@ -306,8 +307,8 @@ async function fetchAdemeDpeForBanId(
       'numero_etage_appartement',
     ].join(',');
 
-    const url = `https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=20&select=${encodeURIComponent(fields)}&identifiant_ban_eq=${encodeURIComponent(banId)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const ademeUrl = `https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=50&select=${encodeURIComponent(fields)}&identifiant_ban_eq=${encodeURIComponent(banId)}`;
+    const res = await fetch(ademeUrl, { signal: AbortSignal.timeout(6000) });
     if (!res.ok) return { totalAtAddress: 0, records: [] };
 
     const json = (await res.json()) as {
@@ -399,41 +400,89 @@ async function fetchCadastreParcel(
   }
 }
 
+async function fetchWfsBboxPaginated(
+  typeName: string,
+  bbox: string,
+  pageSize = 1000,
+  maxPages = 6,
+  timeoutMs = 10000
+): Promise<GeoPolygonFeature[]> {
+  const buildUrl = (startIndex: number) =>
+    `https://data.geopf.fr/wfs/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=${encodeURIComponent(typeName)}&outputFormat=application/json&count=${pageSize}&startIndex=${startIndex}&bbox=${bbox}`;
+
+  const firstRes = await fetch(buildUrl(0), { signal: AbortSignal.timeout(timeoutMs) });
+  if (!firstRes.ok) {
+    throw new Error(`IGN WFS ${typeName} HTTP ${firstRes.status}`);
+  }
+  const firstJson = (await firstRes.json()) as {
+    features?: GeoPolygonFeature[];
+    numberMatched?: number;
+    totalFeatures?: number;
+  };
+  const firstFeatures = firstJson.features ?? [];
+  const totalMatched =
+    typeof firstJson.numberMatched === 'number'
+      ? firstJson.numberMatched
+      : typeof firstJson.totalFeatures === 'number'
+      ? firstJson.totalFeatures
+      : firstFeatures.length;
+
+  if (firstFeatures.length < pageSize || totalMatched <= firstFeatures.length || maxPages <= 1) {
+    return firstFeatures;
+  }
+
+  const neededPages = Math.min(maxPages, Math.ceil(totalMatched / pageSize));
+  const remainingOffsets: number[] = [];
+  for (let p = 1; p < neededPages; p++) {
+    remainingOffsets.push(p * pageSize);
+  }
+
+  const pageResults = await Promise.allSettled(
+    remainingOffsets.map(async (offset) => {
+      const r = await fetch(buildUrl(offset), { signal: AbortSignal.timeout(timeoutMs) });
+      if (!r.ok) return [] as GeoPolygonFeature[];
+      const j = (await r.json()) as { features?: GeoPolygonFeature[] };
+      return j.features ?? [];
+    })
+  );
+
+  const combined: GeoPolygonFeature[] = [...firstFeatures];
+  for (const pr of pageResults) {
+    if (pr.status === 'fulfilled' && pr.value.length > 0) {
+      combined.push(...pr.value);
+    }
+  }
+  return combined;
+}
+
 async function fetchBdTopoContext(
   lat: number,
   lon: number
 ): Promise<{ buildings: ParsedBdTopoBuilding[]; vegetation: ParsedVegetationZone[] } | null> {
-  // Reuse already-fetched sector dataset if point lies inside radius with >= 100m ray margin
+  // Reuse already-fetched sector dataset only if point + 125m ray horizon fits strictly inside cached margin
   for (const entry of sectorBdTopoCache.values()) {
     const dist = haversineDistanceMeters(lat, lon, entry.centerLat, entry.centerLon);
-    if (dist <= entry.radiusMeters) {
+    if (dist + 125 <= entry.marginMeters) {
       return { buildings: entry.buildings, vegetation: entry.vegetation };
     }
   }
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const dLat = 0.0012; // ~133m
-      const dLon = 0.0018; // ~132m
+      const dLat = 0.0013; // ~144m
+      const dLon = 0.0019; // ~139m
       const bbox = `${lat - dLat},${lon - dLon},${lat + dLat},${lon + dLon},urn:ogc:def:crs:EPSG::4326`;
-      const bUrl = `https://data.geopf.fr/wfs/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=BDTOPO_V3:batiment&outputFormat=application/json&count=450&bbox=${bbox}`;
-      const vUrl = `https://data.geopf.fr/wfs/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=BDTOPO_V3:zone_de_vegetation&outputFormat=application/json&count=150&bbox=${bbox}`;
 
       const [bRes, vRes] = await Promise.allSettled([
-        fetch(bUrl, { signal: AbortSignal.timeout(9000) }),
-        fetch(vUrl, { signal: AbortSignal.timeout(6000) }),
+        fetchWfsBboxPaginated('BDTOPO_V3:batiment', bbox, 1000, 3, 9000),
+        fetchWfsBboxPaginated('BDTOPO_V3:zone_de_vegetation', bbox, 500, 2, 6000),
       ]);
 
-      if (bRes.status !== 'fulfilled' || !bRes.value.ok) continue;
-      const bJson = (await bRes.value.json()) as { features?: GeoPolygonFeature[] };
-      const features = bJson.features ?? [];
+      if (bRes.status !== 'fulfilled') continue;
+      const features = bRes.value;
       if (features.length === 0) continue;
 
-      let vegFeatures: GeoPolygonFeature[] = [];
-      if (vRes.status === 'fulfilled' && vRes.value.ok) {
-        const vJson = (await vRes.value.json()) as { features?: GeoPolygonFeature[] };
-        vegFeatures = vJson.features ?? [];
-      }
+      const vegFeatures = vRes.status === 'fulfilled' ? vRes.value : [];
 
       return {
         buildings: prepareBdTopoFeatures(features),
@@ -777,7 +826,8 @@ async function startServer() {
             lat,
             lon,
             bdTopoRaw.vegetation,
-            null
+            null,
+            { includePlanView: true }
           )
         : null;
 
@@ -918,32 +968,35 @@ async function startServer() {
 
       let cachedSector = sectorBdTopoCache.get(boxKey);
       if (!cachedSector) {
-        const bbox = `${(centerLat - dLat).toFixed(5)},${(centerLon - dLon).toFixed(5)},${(centerLat + dLat).toFixed(5)},${(centerLon + dLon).toFixed(5)},urn:ogc:def:crs:EPSG::4326`;
-        const bUrl = `https://data.geopf.fr/wfs/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=BDTOPO_V3:batiment&outputFormat=application/json&count=1200&bbox=${bbox}`;
-        const vUrl = `https://data.geopf.fr/wfs/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=BDTOPO_V3:zone_de_vegetation&outputFormat=application/json&count=350&bbox=${bbox}`;
+        for (const entry of sectorBdTopoCache.values()) {
+          const dist = haversineDistanceMeters(centerLat, centerLon, entry.centerLat, entry.centerLon);
+          if (dist + marginMeters <= entry.marginMeters) {
+            cachedSector = entry;
+            break;
+          }
+        }
+      }
 
-        const [wfsRes, vegRes] = await Promise.allSettled([
-          fetch(bUrl, { signal: AbortSignal.timeout(9000) }),
-          fetch(vUrl, { signal: AbortSignal.timeout(6000) }),
+      if (!cachedSector) {
+        const bbox = `${(centerLat - dLat).toFixed(5)},${(centerLon - dLon).toFixed(5)},${(centerLat + dLat).toFixed(5)},${(centerLon + dLon).toFixed(5)},urn:ogc:def:crs:EPSG::4326`;
+
+        const [bRes, vegRes] = await Promise.allSettled([
+          fetchWfsBboxPaginated('BDTOPO_V3:batiment', bbox, 1000, 6, 10000),
+          fetchWfsBboxPaginated('BDTOPO_V3:zone_de_vegetation', bbox, 500, 3, 7000),
         ]);
 
-        if (wfsRes.status !== 'fulfilled' || !wfsRes.value.ok) {
-          const status = wfsRes.status === 'fulfilled' ? wfsRes.value.status : 504;
-          return res.status(502).json({ error: `IGN BD TOPO indisponible (${status})` });
+        if (bRes.status !== 'fulfilled') {
+          return res.status(502).json({ error: 'IGN BD TOPO indisponible' });
         }
 
-        const json = (await wfsRes.value.json()) as { features?: GeoPolygonFeature[] };
-        let vegFeatures: GeoPolygonFeature[] = [];
-        if (vegRes.status === 'fulfilled' && vegRes.value.ok) {
-          const vJson = (await vegRes.value.json()) as { features?: GeoPolygonFeature[] };
-          vegFeatures = vJson.features ?? [];
-        }
+        const vegFeatures = vegRes.status === 'fulfilled' ? vegRes.value : [];
 
         cachedSector = {
           centerLat,
           centerLon,
           radiusMeters,
-          buildings: prepareBdTopoFeatures(json.features ?? []),
+          marginMeters,
+          buildings: prepareBdTopoFeatures(bRes.value),
           vegetation: prepareVegetationFeatures(vegFeatures),
         };
         sectorBdTopoCache.set(boxKey, cachedSector);

@@ -282,14 +282,16 @@ export function aggregateAndFilterDvfRows(
     'centerLat' | 'centerLon' | 'radiusMeters' | 'minSurface' | 'maxSurface' | 'rooms' | 'years' | 'includeBlockSales'
   >
 ): AggregationOutput {
-  // Group all rows by id_mutation to understand the full scope of each notary deed
-  const byMutation = new Map<string, RawDvfRow[]>();
+  // Group all rows by (id_mutation, numero_disposition) to understand the exact scope of each notary disposition
+  const byMutation = new Map<string, { idMutation: string; rows: RawDvfRow[] }>();
   for (const row of rows) {
-    const list = byMutation.get(row.id_mutation);
-    if (list) {
-      list.push(row);
+    const disp = row.numero_disposition || '000001';
+    const mutKey = `${row.id_mutation}|${disp}`;
+    const entry = byMutation.get(mutKey);
+    if (entry) {
+      entry.rows.push(row);
     } else {
-      byMutation.set(row.id_mutation, [row]);
+      byMutation.set(mutKey, { idMutation: row.id_mutation, rows: [row] });
     }
   }
 
@@ -298,8 +300,9 @@ export function aggregateAndFilterDvfRows(
   const transactions: DvfTransaction[] = [];
   let excludedBlockSalesCount = 0;
 
-  for (const [idMutation, mutRows] of byMutation.entries()) {
-    // Count main units vs annexes (Dépendance) in the entire mutation
+  const usedTxIds = new Set<string>();
+  for (const { idMutation, rows: mutRows } of byMutation.values()) {
+    // Count main units vs annexes (Dépendance) in the entire disposition
     const mainUnits = mutRows.filter(
       (r) =>
         r.type_local === 'Appartement' ||
@@ -308,7 +311,7 @@ export function aggregateAndFilterDvfRows(
     );
     const dependances = mutRows.filter((r) => r.type_local === 'Dépendance');
 
-    // Deduplicate identical apartment rows within the same mutation (e.g., split cadastral lots)
+    // Deduplicate identical apartment rows within the same disposition (e.g., split cadastral lots)
     const uniqueAptMap = new Map<string, RawDvfRow>();
     for (const r of mainUnits) {
       if (r.type_local !== 'Appartement') continue;
@@ -366,9 +369,15 @@ export function aggregateAndFilterDvfRows(
 
       const carrez = row.lot1_surface_carrez ?? row.lot2_surface_carrez ?? null;
       const pricePerSqm = Math.round(row.valeur_fonciere / row.surface_reelle_bati);
+      let txId = `${idMutation}-${idxInMut}`;
+      if (usedTxIds.has(txId)) {
+        const dispSuffix = row.numero_disposition || '2';
+        txId = `${idMutation}-d${dispSuffix}-${idxInMut}`;
+      }
+      usedTxIds.add(txId);
 
       transactions.push({
-        id: `${idMutation}-${idxInMut}`,
+        id: txId,
         idMutation,
         dateMutation: row.date_mutation,
         year,

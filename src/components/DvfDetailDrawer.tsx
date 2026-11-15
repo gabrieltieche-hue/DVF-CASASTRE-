@@ -128,18 +128,6 @@ export function DvfDetailDrawer({
     );
   }, [transaction, allTransactions]);
 
-  if (!transaction) return null;
-
-  const deltaVsMedianPct =
-    sectorMedianPricePerSqm && sectorMedianPricePerSqm > 0
-      ? Math.round(((transaction.pricePerSqm - sectorMedianPricePerSqm) / sectorMedianPricePerSqm) * 100)
-      : null;
-
-  const osmUrl = `https://www.openstreetmap.org/?mlat=${transaction.latitude}&mlon=${transaction.longitude}#map=19/${transaction.latitude}/${transaction.longitude}`;
-  const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${transaction.latitude},${transaction.longitude}`;
-  const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${transaction.latitude},${transaction.longitude}`;
-  const geoportailUrl = `https://www.geoportail.gouv.fr/carte?c=${transaction.longitude},${transaction.latitude}&z=19&l0=CADASTRALPARCELS.PARCELLAIRE_EXPRESS::GEOPORTAIL:OGC:WMTS(1)&permalink=yes`;
-
   const bdnb = enrichment?.bdnb ?? null;
   const bdTopo = enrichment?.bdTopo ?? null;
   const lidar = enrichment?.lidarAlti ?? null;
@@ -148,13 +136,21 @@ export function DvfDetailDrawer({
   const meteo = enrichment?.meteoFrance ?? null;
   const osm = enrichment?.osm ?? null;
 
+  const cleanMaterial = (val: string | null | undefined): string | null => {
+    if (!val) return null;
+    const up = val.trim().toUpperCase();
+    if (!up || up === 'INDETERMINE' || up === '00' || up === 'NON RENSEIGNE') return null;
+    return val.trim();
+  };
+
   const subjectHeight = bdTopo?.subjectHeightM ?? bdnb?.meanHeightM ?? 18;
   const subjectFloors =
     bdTopo?.subjectFloors ?? bdnb?.floors ?? Math.max(2, Math.round(subjectHeight / 2.9));
   const maxSimFloor = Math.max(1, Math.min(12, Math.round(subjectFloors) - 1));
+  const dpeRecords = enrichment?.ademeDpe?.records ?? [];
   const matchedDpeWithFloor =
-    enrichment?.ademeDpe.records.find((r) => r.likelyMatch && r.floorNumber !== null) ??
-    enrichment?.ademeDpe.records.find((r) => r.floorNumber !== null) ??
+    dpeRecords.find((r) => r.likelyMatch && r.floorNumber !== null) ??
+    dpeRecords.find((r) => r.floorNumber !== null) ??
     null;
   const defaultFloor =
     matchedDpeWithFloor?.floorNumber !== null && matchedDpeWithFloor?.floorNumber !== undefined
@@ -176,22 +172,40 @@ export function DvfDetailDrawer({
   const activeFacingFloors = activeFacade?.facingFloors ?? null;
   const activeDir = activeFacade?.direction ?? bdTopo?.principalDirection ?? null;
   const activeVeg = activeFacade?.vegetationScreen ?? null;
+  const activeGroundDelta = activeFacade?.groundDeltaM ?? 0;
 
   const floorSkyOpennessPct = useMemo(() => {
     if (!bdTopo) return null;
-    const major = bdTopo.facades.filter((f) => f.facadeLengthM >= 4.5);
+    const major = bdTopo.facades.filter((f) => f.facadeLengthM >= 2.5);
     const pool = major.length > 0 ? major : bdTopo.facades;
     if (pool.length === 0) return bdTopo.skyOpennessPct;
     const totalW = pool.reduce((s, f) => s + f.facadeLengthM, 0);
     if (totalW <= 0) return bdTopo.skyOpennessPct;
     const weightedSky = pool.reduce((s, f) => {
       if (f.distanceM === null || f.facingHeightM === null) return s + 94 * f.facadeLengthM;
-      const angle = computeObstructionAngleForFloor(f.facingHeightM, f.distanceM, evalFloor);
+      const angle = computeObstructionAngleForFloor(
+        f.facingHeightM,
+        f.distanceM,
+        evalFloor,
+        f.groundDeltaM ?? 0
+      );
       const score = Math.max(14, Math.min(94, Math.round((1 - angle / 90) * 100)));
       return s + score * f.facadeLengthM;
     }, 0);
     return Math.round(weightedSky / totalW);
   }, [bdTopo, evalFloor]);
+
+  if (!transaction) return null;
+
+  const deltaVsMedianPct =
+    sectorMedianPricePerSqm && sectorMedianPricePerSqm > 0
+      ? Math.round(((transaction.pricePerSqm - sectorMedianPricePerSqm) / sectorMedianPricePerSqm) * 100)
+      : null;
+
+  const osmUrl = `https://www.openstreetmap.org/?mlat=${transaction.latitude}&mlon=${transaction.longitude}#map=19/${transaction.latitude}/${transaction.longitude}`;
+  const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${transaction.latitude},${transaction.longitude}`;
+  const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${transaction.latitude},${transaction.longitude}`;
+  const geoportailUrl = `https://www.geoportail.gouv.fr/carte?c=${transaction.longitude},${transaction.latitude}&z=19&l0=CADASTRALPARCELS.PARCELLAIRE_EXPRESS::GEOPORTAIL:OGC:WMTS(1)&permalink=yes`;
 
   const isVefa = transaction.natureMutation.toLowerCase().includes('futur');
   const luminosity =
@@ -240,20 +254,20 @@ export function DvfDetailDrawer({
         <div className="px-6 py-3.5 bg-slate-50 border-b border-slate-200 grid grid-cols-3 gap-4">
           <div>
             <div className="text-[11px] text-slate-500">Valeur foncière</div>
-            <div className="text-lg font-bold font-mono tabular-nums text-slate-900">
+            <div className="text-base sm:text-lg font-bold font-mono tabular-nums text-slate-900 whitespace-nowrap">
               {formatEuros(transaction.valeurFonciere)}
             </div>
           </div>
           <div>
             <div className="text-[11px] text-slate-500">Prix au m² bâti</div>
-            <div className="text-lg font-bold font-mono tabular-nums text-[#1D4ED8]">
+            <div className="text-base sm:text-lg font-bold font-mono tabular-nums text-[#1D4ED8] whitespace-nowrap">
               {formatPricePerSqm(transaction.pricePerSqm)}
             </div>
           </div>
           <div>
             <div className="text-[11px] text-slate-500">Écart vs médiane secteur</div>
             <div
-              className={`text-lg font-bold font-mono tabular-nums ${
+              className={`text-base sm:text-lg font-bold font-mono tabular-nums whitespace-nowrap ${
                 deltaVsMedianPct === null
                   ? 'text-slate-700'
                   : deltaVsMedianPct > 5
@@ -350,7 +364,15 @@ export function DvfDetailDrawer({
                     </dd>
                   </div>
                   <div className="py-2.5 flex items-center justify-between gap-4">
-                    <dt className="text-slate-500">Surface réelle bâtie</dt>
+                    <div>
+                      <dt className="text-slate-500">Surface réelle bâtie</dt>
+                      {transaction.surfaceCarrez !== null &&
+                        Math.abs(transaction.surfaceCarrez - transaction.surfaceBati) > 0.5 && (
+                          <div className="text-[10px] text-slate-400">
+                            Surface fiscale DGFiP (hors annexes / loggias)
+                          </div>
+                        )}
+                    </div>
                     <dd className="font-mono tabular-nums font-medium text-slate-900">
                       {formatSurface(transaction.surfaceBati)}
                     </dd>
@@ -488,11 +510,32 @@ export function DvfDetailDrawer({
                     <h4 className="text-xs font-semibold text-slate-900 mb-2">
                       Fiche technique de l’immeuble (BDNB — CSTB)
                     </h4>
-                    {!bdnb ? (
+                    {!bdnb && !bdTopo ? (
                       <p className="text-xs text-slate-500 border border-slate-200 rounded-md p-3">
-                        Aucun bâtiment apparié dans la BDNB pour cette adresse BAN ({enrichment?.banId ?? 'inconnue'}).
+                        Aucun bâtiment apparié dans la BDNB ni dans IGN BD TOPO pour cette adresse BAN ({enrichment?.banId ?? 'inconnue'}).
                       </p>
-                    ) : (
+                    ) : !bdnb && bdTopo ? (
+                      <dl className="divide-y divide-slate-100 text-xs border border-slate-200 rounded-md px-4">
+                        <div className="py-2 flex justify-between gap-4">
+                          <dt className="text-slate-500">Appariement BDNB</dt>
+                          <dd className="text-slate-600 text-right">Non apparié · Gabarit issu d’IGN BD TOPO</dd>
+                        </div>
+                        <div className="py-2 flex justify-between gap-4">
+                          <dt className="text-slate-500">Matériaux IGN (Murs / Toiture)</dt>
+                          <dd className="font-medium text-slate-900 text-right">
+                            {[bdTopo.subjectWallMaterial, bdTopo.subjectRoofMaterial].filter(Boolean).join(' / ') || '—'}
+                          </dd>
+                        </div>
+                        <div className="py-2 flex justify-between gap-4">
+                          <dt className="text-slate-500">Gabarit 3D (IGN BD TOPO)</dt>
+                          <dd className="font-mono text-slate-900">
+                            {bdTopo.subjectFloors ? `${bdTopo.subjectFloors} niveaux` : '—'}
+                            {bdTopo.subjectDwellings ? ` · ${bdTopo.subjectDwellings} logements` : ''}
+                            {bdTopo.subjectHeightM ? ` · H = ${bdTopo.subjectHeightM} m` : ''}
+                          </dd>
+                        </div>
+                      </dl>
+                    ) : bdnb ? (
                       <div className="space-y-4">
                         <dl className="divide-y divide-slate-100 text-xs border border-slate-200 rounded-md px-4">
                           <div className="py-2 flex justify-between gap-4">
@@ -504,25 +547,48 @@ export function DvfDetailDrawer({
                           <div className="py-2 flex justify-between gap-4">
                             <dt className="text-slate-500">Matériaux (Murs / Toiture)</dt>
                             <dd className="font-medium text-slate-900 text-right">
-                              {[bdnb.wallMaterial, bdnb.roofMaterial].filter(Boolean).join(' / ') || '—'}
+                              {(() => {
+                                const w =
+                                  cleanMaterial(bdnb.wallMaterial) ??
+                                  (bdTopo?.subjectWallMaterial ? `${bdTopo.subjectWallMaterial} (IGN)` : null);
+                                const r =
+                                  cleanMaterial(bdnb.roofMaterial) ??
+                                  (bdTopo?.subjectRoofMaterial ? `${bdTopo.subjectRoofMaterial} (IGN)` : null);
+                                return [w, r].filter(Boolean).join(' / ') || '—';
+                              })()}
                             </dd>
                           </div>
                           <div className="py-2 flex justify-between gap-4">
                             <dt className="text-slate-500">Gabarit & Copropriété</dt>
                             <dd className="font-mono text-slate-900">
-                              {bdnb.floors ? `${bdnb.floors} niveaux` : '—'} ·{' '}
-                              {bdnb.dwellingsCount ? `${bdnb.dwellingsCount} logements` : '—'} ·{' '}
-                              {bdnb.meanHeightM ? `H = ${bdnb.meanHeightM} m` : ''}
+                              {(bdnb.floors ?? bdTopo?.subjectFloors)
+                                ? `${bdnb.floors ?? bdTopo?.subjectFloors} niveaux`
+                                : '—'}{' '}
+                              ·{' '}
+                              {(bdnb.dwellingsCount ?? bdTopo?.subjectDwellings)
+                                ? `${bdnb.dwellingsCount ?? bdTopo?.subjectDwellings} logements`
+                                : '—'}
+                              {(bdnb.meanHeightM ?? bdTopo?.subjectHeightM)
+                                ? ` · H = ${bdnb.meanHeightM ?? bdTopo?.subjectHeightM} m`
+                                : ''}
                             </dd>
                           </div>
                           <div className="py-2 flex justify-between gap-4">
                             <dt className="text-slate-500">Orientation & Traversant</dt>
                             <dd className="font-medium text-slate-900 text-right">
-                              {bdnb.traversing
-                                ? `Traversant (${bdnb.traversing})`
-                                : bdnb.windowOrientations.length > 0
-                                ? bdnb.windowOrientations.join(', ')
-                                : 'Non renseignée'}
+                              {(() => {
+                                if (bdnb.traversing) {
+                                  const t = bdnb.traversing.trim();
+                                  if (t.toLowerCase().includes('traversant')) {
+                                    return t.charAt(0).toUpperCase() + t.slice(1);
+                                  }
+                                  return `Traversant (${t})`;
+                                }
+                                if (bdnb.windowOrientations.length > 0) {
+                                  return bdnb.windowOrientations.join(', ');
+                                }
+                                return luminosity?.crossLightLabel ?? 'Non renseignée';
+                              })()}
                             </dd>
                           </div>
                           <div className="py-2 flex justify-between gap-4">
@@ -599,7 +665,7 @@ export function DvfDetailDrawer({
                           );
                         })()}
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* ADEME Observatoire des DPE */}
@@ -775,121 +841,480 @@ export function DvfDetailDrawer({
                           )}
                         </div>
 
+                        {/* 2D Footprint Plan View (IGN BD TOPO Lambert-93 real polygons) */}
+                        {bdTopo.planView && bdTopo.planView.buildings.length > 0 && (() => {
+                          const pv = bdTopo.planView;
+                          const pW = 560;
+                          const pH = 216;
+                          // Auto-fit subject building + ray endpoints + nearby buildings into viewport around (0, 0)
+                          let maxAbsX = 28;
+                          let maxAbsY = 20;
+                          const subjPoly = pv.buildings.find((b) => b.isSubject);
+                          if (subjPoly) {
+                            for (const r of subjPoly.outerRings) {
+                              for (const [x, y] of r) {
+                                maxAbsX = Math.max(maxAbsX, Math.abs(x) + 18);
+                                maxAbsY = Math.max(maxAbsY, Math.abs(y) + 14);
+                              }
+                            }
+                          }
+                          for (const ray of pv.rays) {
+                            maxAbsX = Math.max(maxAbsX, Math.abs(ray.end[0]) + 10);
+                            maxAbsY = Math.max(maxAbsY, Math.abs(ray.end[1]) + 10);
+                          }
+                          const pxPerMPlan = Math.min(
+                            (pW - 44) / Math.max(40, maxAbsX * 2),
+                            (pH - 28) / Math.max(28, maxAbsY * 2),
+                            4.5
+                          );
+                          const cxSvg = pW / 2;
+                          const cySvg = pH / 2;
+                          const toSvgPt = (x: number, y: number): [number, number] => [
+                            Math.round((cxSvg + x * pxPerMPlan) * 10) / 10,
+                            Math.round((cySvg - y * pxPerMPlan) * 10) / 10, // +Y North -> UP in SVG
+                          ];
+                          const ringsToPath = (
+                            outerRings: Array<Array<[number, number]>>,
+                            holeRings: Array<Array<[number, number]>>
+                          ) => {
+                            const segs: string[] = [];
+                            for (const ring of [...outerRings, ...holeRings]) {
+                              if (ring.length < 3) continue;
+                              const pts = ring.map(([x, y], idx) => {
+                                const [sx, sy] = toSvgPt(x, y);
+                                return `${idx === 0 ? 'M' : 'L'}${sx},${sy}`;
+                              });
+                              segs.push(`${pts.join(' ')} Z`);
+                            }
+                            return segs.join(' ');
+                          };
+                          const scaleBarMeters = pxPerMPlan * 20 <= 110 ? 20 : 10;
+                          const scaleBarPx = Math.round(scaleBarMeters * pxPerMPlan * 10) / 10;
+
+                          return (
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px] text-slate-600">
+                                <span className="font-semibold text-slate-800">
+                                  Plan d’implantation 2D réel (emprises IGN BD TOPO · échelle 1:1)
+                                </span>
+                                <span className="font-mono text-[10px] text-slate-500">
+                                  Cliquez sur un axe pour changer de façade
+                                </span>
+                              </div>
+                              <svg
+                                viewBox={`0 0 ${pW} ${pH}`}
+                                className="w-full h-auto rounded border border-slate-200 bg-slate-50/70"
+                                role="img"
+                                aria-label="Plan d'implantation 2D réel des bâtiments IGN BD TOPO"
+                              >
+                                <defs>
+                                  <pattern id="planAdjoinHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                                    <line x1="0" y1="0" x2="0" y2="5" stroke="#94A3B8" strokeWidth="1" strokeOpacity="0.45" />
+                                  </pattern>
+                                </defs>
+
+                                {/* Metric distance rings */}
+                                {[15, 30].map((rm) => (
+                                  <circle
+                                    key={rm}
+                                    cx={cxSvg}
+                                    cy={cySvg}
+                                    r={rm * pxPerMPlan}
+                                    fill="none"
+                                    stroke="#CBD5E1"
+                                    strokeWidth={0.8}
+                                    strokeDasharray="3 3"
+                                  />
+                                ))}
+
+                                {/* Vegetation polygons */}
+                                {pv.vegetation.map((veg, idx) => {
+                                  const d = ringsToPath([veg.ring], []);
+                                  if (!d) return null;
+                                  return (
+                                    <path
+                                      key={`veg-${idx}`}
+                                      d={d}
+                                      fill="#22C55E"
+                                      fillOpacity={0.22}
+                                      stroke="#15803D"
+                                      strokeWidth={0.9}
+                                    />
+                                  );
+                                })}
+
+                                {/* Neighbor buildings */}
+                                {pv.buildings
+                                  .filter((b) => !b.isSubject)
+                                  .map((b, idx) => {
+                                    const d = ringsToPath(b.outerRings, b.holeRings);
+                                    if (!d) return null;
+                                    const pts = b.outerRings[0] ?? [];
+                                    let sxSum = 0;
+                                    let sySum = 0;
+                                    for (const [px, py] of pts) {
+                                      sxSum += px;
+                                      sySum += py;
+                                    }
+                                    const n = Math.max(1, pts.length);
+                                    const [lx, ly] = toSvgPt(sxSum / n, sySum / n);
+                                    const isActiveTarget = activeFacade?.facingBuildingId === b.id;
+                                    const inViewport = lx > 20 && lx < pW - 20 && ly > 16 && ly < pH - 16;
+                                    return (
+                                      <g key={`${b.id}-${idx}`}>
+                                        <path
+                                          d={d}
+                                          fillRule="evenodd"
+                                          fill={
+                                            isActiveTarget
+                                              ? '#FDE68A'
+                                              : b.isAdjoining
+                                              ? 'url(#planAdjoinHatch)'
+                                              : '#E2E8F0'
+                                          }
+                                          fillOpacity={isActiveTarget ? 0.65 : 0.9}
+                                          stroke={isActiveTarget ? '#D97706' : b.isAdjoining ? '#94A3B8' : '#64748B'}
+                                          strokeWidth={isActiveTarget ? 1.6 : 1}
+                                        />
+                                        {inViewport && b.heightM >= 4 && Math.hypot(lx - cxSvg, ly - cySvg) >= 18 && (
+                                          <text
+                                            x={lx}
+                                            y={Math.max(14, Math.min(pH - 12, ly + 3))}
+                                            textAnchor="middle"
+                                            className="fill-slate-700 text-[8px] font-mono font-semibold pointer-events-none"
+                                          >
+                                            {Math.round(b.heightM)}m
+                                          </text>
+                                        )}
+                                      </g>
+                                    );
+                                  })}
+
+                                {/* Subject building (with courtyard holes cut out via evenodd) */}
+                                {subjPoly && (
+                                  <path
+                                    d={ringsToPath(subjPoly.outerRings, subjPoly.holeRings)}
+                                    fillRule="evenodd"
+                                    fill="#DBEAFE"
+                                    stroke="#1D4ED8"
+                                    strokeWidth={2}
+                                  />
+                                )}
+
+                                {/* Facade rays & collision-free distance badges */}
+                                {(() => {
+                                  const placedBadges: Array<{ x: number; y: number }> = [];
+                                  const rayDraws = pv.rays.map((ray) => {
+                                    const rayKey = `${ray.direction}${ray.isCourtyard ? '-cour' : ''}`;
+                                    const isSel = activeFacade ? getFacadeKey(activeFacade) === rayKey : false;
+                                    const [sx, sy] = toSvgPt(ray.start[0], ray.start[1]);
+                                    const [ex, ey] = toSvgPt(ray.end[0], ray.end[1]);
+                                    const tBadge = isSel ? 0.56 : 0.62;
+                                    const mx = Math.max(24, Math.min(pW - 24, sx + (ex - sx) * tBadge));
+                                    const my = Math.max(14, Math.min(pH - 20, sy + (ey - sy) * tBadge));
+                                    return { ray, rayKey, isSel, sx, sy, ex, ey, mx, my };
+                                  });
+                                  const badgeKeys = new Set<string>();
+                                  const prioritized = [...rayDraws].sort((a, b) => {
+                                    if (a.isSel !== b.isSel) return a.isSel ? -1 : 1;
+                                    if (a.ray.isCourtyard !== b.ray.isCourtyard) return a.ray.isCourtyard ? 1 : -1;
+                                    return (b.ray.distanceM ?? 99) - (a.ray.distanceM ?? 99);
+                                  });
+                                  for (const item of prioritized) {
+                                    const eligible =
+                                      item.isSel ||
+                                      (!item.ray.isCourtyard &&
+                                        item.ray.distanceM !== null &&
+                                        item.ray.distanceM <= 35);
+                                    if (!eligible) continue;
+                                    const collides = placedBadges.some(
+                                      (p) => Math.abs(p.x - item.mx) < 40 && Math.abs(p.y - item.my) < 17
+                                    );
+                                    if (!collides || item.isSel) {
+                                      badgeKeys.add(item.rayKey);
+                                      placedBadges.push({ x: item.mx, y: item.my });
+                                    }
+                                  }
+
+                                  return (
+                                    <>
+                                      {rayDraws.map(({ rayKey, isSel, sx, sy, ex, ey }) => (
+                                        <g
+                                          key={`ray-line-${rayKey}`}
+                                          className="cursor-pointer"
+                                          onClick={() => setSelectedFacadeDir(rayKey)}
+                                        >
+                                          <line
+                                            x1={sx}
+                                            y1={sy}
+                                            x2={ex}
+                                            y2={ey}
+                                            stroke={isSel ? '#0F766E' : '#94A3B8'}
+                                            strokeWidth={isSel ? 2.2 : 1.1}
+                                            strokeDasharray={isSel ? undefined : '3 2'}
+                                          />
+                                          <circle cx={ex} cy={ey} r={isSel ? 3 : 2} fill={isSel ? '#0F766E' : '#64748B'} />
+                                        </g>
+                                      ))}
+                                      {rayDraws
+                                        .filter((item) => badgeKeys.has(item.rayKey))
+                                        .map(({ ray, rayKey, isSel, mx, my }) => (
+                                          <g
+                                            key={`ray-badge-${rayKey}`}
+                                            className="cursor-pointer"
+                                            onClick={() => setSelectedFacadeDir(rayKey)}
+                                          >
+                                            <rect
+                                              x={mx - 19}
+                                              y={my - 8}
+                                              width={38}
+                                              height={15}
+                                              rx={3}
+                                              fill="#FFFFFF"
+                                              fillOpacity={0.95}
+                                              stroke={isSel ? '#0F766E' : '#CBD5E1'}
+                                              strokeWidth={isSel ? 1.2 : 0.8}
+                                            />
+                                            <text
+                                              x={mx}
+                                              y={my + 3}
+                                              textAnchor="middle"
+                                              className={`text-[8.5px] font-mono font-bold ${
+                                                isSel ? 'fill-[#0F766E]' : 'fill-slate-700'
+                                              }`}
+                                            >
+                                              {ray.distanceM !== null ? `${ray.distanceM}m` : '>45m'}
+                                            </text>
+                                          </g>
+                                        ))}
+                                    </>
+                                  );
+                                })()}
+
+                                {/* Compass Rose (North UP) */}
+                                <g transform={`translate(${pW - 26}, 26)`}>
+                                  <circle cx={0} cy={0} r={14} fill="#FFFFFF" fillOpacity={0.9} stroke="#CBD5E1" />
+                                  <polygon points="0,-10 -3,-2 3,-2" fill="#1D4ED8" />
+                                  <text x={0} y={8} textAnchor="middle" className="fill-slate-700 text-[8px] font-mono font-bold">
+                                    N
+                                  </text>
+                                </g>
+
+                                {/* Metric Scale Bar */}
+                                <g transform={`translate(14, ${pH - 16})`}>
+                                  <rect x={-4} y={-11} width={scaleBarPx + 36} height={18} rx={3} fill="#FFFFFF" fillOpacity={0.88} />
+                                  <line x1={0} x2={scaleBarPx} y1={0} y2={0} stroke="#0F172A" strokeWidth={1.6} />
+                                  <line x1={0} x2={0} y1={-3} y2={3} stroke="#0F172A" strokeWidth={1.4} />
+                                  <line x1={scaleBarPx} x2={scaleBarPx} y1={-3} y2={3} stroke="#0F172A" strokeWidth={1.4} />
+                                  <text x={scaleBarPx + 5} y={3} className="fill-slate-700 text-[8.5px] font-mono font-semibold">
+                                    {scaleBarMeters} m
+                                  </text>
+                                </g>
+                              </svg>
+                            </div>
+                          );
+                        })()}
+
                         {(() => {
                           const svgW = 560;
-                          const svgH = 268;
-                          const groundY = 232;
-                          const roofCapPx = 14;
-                          const maxH = Math.max(subjectHeight, activeFacingH ?? 16, 26);
-                          const scaleY = 160 / maxH;
-                          const subjH = Math.max(36, subjectHeight * scaleY);
-                          const nbH = activeFacingH ? Math.max(32, activeFacingH * scaleY) : 0;
-                          const subjFloorsCount = Math.max(2, Math.min(12, Math.round(subjectFloors)));
+                          const svgH = 276;
+                          const groundBaseY = 232;
+                          const roofCapPx = 12;
+
+                          const isBrokenHorizontal = activeDist !== null && activeDist > 42;
+                          const maxPhysH = Math.max(
+                            subjectHeight + 4,
+                            (activeFacingH ?? 16) + Math.max(0, activeGroundDelta) + 4,
+                            24
+                          );
+                          const physDistForScale =
+                            activeDist !== null ? Math.min(42, Math.max(4, activeDist)) : 26;
+
+                          // Uniform 1:1 metric scale (same px/m horizontally and vertically up to 42m!)
+                          const pxPerM = Math.max(
+                            3.8,
+                            Math.min(7.2, 178 / maxPhysH, 265 / Math.max(12, physDistForScale))
+                          );
+                          const scaleY = pxPerM;
+                          const scaleX = isBrokenHorizontal ? 255 / (activeDist ?? 60) : pxPerM;
+
+                          const subjH = Math.max(30, subjectHeight * scaleY);
+                          const nbH = activeFacingH ? Math.max(24, activeFacingH * scaleY) : 0;
+                          const subjFloorsCount = Math.max(1, Math.min(12, Math.round(subjectFloors)));
                           const nbFloors = Math.max(
-                            2,
+                            1,
                             Math.min(12, activeFacingFloors ?? Math.round((activeFacingH ?? 15) / 3))
                           );
 
                           const gapPx =
                             activeDist !== null
-                              ? Math.max(54, Math.min(200, activeDist * 5.8))
-                              : 170;
+                              ? isBrokenHorizontal
+                                ? 255
+                                : Math.max(24, activeDist * pxPerM)
+                              : 195;
 
-                          const subjX = 68;
-                          const subjW = 104;
+                          const subjX = 76;
+                          const subjW = 84;
                           const subjRightX = subjX + subjW;
-                          const subjTopY = groundY - subjH;
+                          const subjGroundY = groundBaseY;
+                          const subjTopY = subjGroundY - subjH;
 
+                          const nbGroundY = Math.max(
+                            140,
+                            Math.min(svgH - 28, subjGroundY - activeGroundDelta * scaleY)
+                          );
                           const nbX = subjRightX + gapPx;
-                          const nbW = 104;
-                          const nbTopY = groundY - nbH;
+                          const nbW = 84;
+                          const nbTopY = nbGroundY - nbH;
 
                           const targetFloor = Math.max(0, Math.min(subjFloorsCount - 1, evalFloor));
                           const floorH = subjH / subjFloorsCount;
-                          // Align SVG window point directly with physical apartment elevation H_appart = 0.5 + evalFloor * 2.9 m
                           const winY = Math.max(
                             subjTopY + 5,
-                            Math.min(groundY - 5, groundY - hAppart * scaleY)
+                            Math.min(subjGroundY - 5, subjGroundY - hAppart * scaleY)
                           );
+
+                          const activeObstructionAngle =
+                            activeDist !== null && activeFacingH !== null
+                              ? computeObstructionAngleForFloor(
+                                  activeFacingH,
+                                  activeDist,
+                                  evalFloor,
+                                  activeGroundDelta
+                                )
+                              : 0;
+
+                          // Orientation-aware solar regime for Paris (48.83°N)
+                          const dirCode = activeDir ?? 'S';
+                          const solarSector: 'south' | 'eastwest' | 'north' =
+                            dirCode === 'S' || dirCode === 'SE' || dirCode === 'SO'
+                              ? 'south'
+                              : dirCode === 'E' || dirCode === 'O'
+                              ? 'eastwest'
+                              : 'north';
 
                           const winterSlope = Math.tan((18 * Math.PI) / 180);
                           const winterShadowHeightM =
                             activeDist !== null && activeFacingH !== null
-                              ? activeFacingH - activeDist * winterSlope
+                              ? activeFacingH + activeGroundDelta - activeDist * winterSlope
                               : 0;
                           const winterRayAtSubjY =
                             activeDist !== null && activeFacingH !== null
-                              ? groundY - winterShadowHeightM * scaleY
-                              : groundY;
-                          const clampedShadowTopY = Math.max(subjTopY, Math.min(groundY, winterRayAtSubjY));
+                              ? subjGroundY - winterShadowHeightM * scaleY
+                              : subjGroundY;
+                          const clampedShadowTopY = Math.max(
+                            subjTopY,
+                            Math.min(subjGroundY, winterRayAtSubjY)
+                          );
                           const winterBlockedFloors =
-                            activeDist !== null && activeFacingH !== null && winterShadowHeightM > 0.5
+                            solarSector !== 'north' &&
+                            activeDist !== null &&
+                            activeFacingH !== null &&
+                            winterShadowHeightM > 0.5
                               ? Array.from({ length: subjFloorsCount }).filter(
                                   (_, flIdx) => 0.5 + flIdx * 2.9 < winterShadowHeightM
                                 ).length
                               : 0;
 
-                          const activeObstructionAngle =
-                            activeDist !== null && activeFacingH !== null
-                              ? computeObstructionAngleForFloor(activeFacingH, activeDist, evalFloor)
-                              : 0;
+                          const hasNeighborDrawn =
+                            activeDist !== null && activeFacingH !== null && nbX + 30 < svgW;
 
-                          // Horizontal-to-vertical aspect factor so SVG rays intersect the neighbor at exact physical sunHitHeightM
-                          const effScaleX = activeDist !== null && activeDist > 0 ? gapPx / activeDist : scaleY;
+                          // Exact sky wedge polygon from (subjRightX, winY) past (nbX, nbTopY)
+                          const skyWedgePoints = (() => {
+                            if (!hasNeighborDrawn) {
+                              return `${subjRightX},${winY} ${svgW},${winY} ${svgW},12 ${subjRightX},12`;
+                            }
+                            const dyObs = winY - nbTopY;
+                            if (dyObs <= 0) {
+                              // Apartment sits above neighbor roof -> horizon unobstructed
+                              return `${subjRightX},${winY} ${svgW},${winY} ${svgW},12 ${subjRightX},12`;
+                            }
+                            const obsSlopePx = dyObs / Math.max(1, nbX - subjRightX);
+                            const rayTopX = subjRightX + (winY - 12) / obsSlopePx;
+                            if (rayTopX <= svgW) {
+                              return `${subjRightX},${winY} ${rayTopX.toFixed(1)},12 ${subjRightX},12`;
+                            }
+                            const rightY = winY - (svgW - subjRightX) * obsSlopePx;
+                            return `${subjRightX},${winY} ${svgW},${rightY.toFixed(1)} ${svgW},12 ${subjRightX},12`;
+                          })();
 
-                          const rays = [
-                            { id: 'summer', label: 'Été 65°', deg: 65, color: '#0F766E', dash: '5 3', width: 1.4 },
-                            { id: 'equinox', label: 'Équinoxe 41°', deg: 41, color: '#EAB308', dash: undefined, width: 1.6 },
-                            { id: 'winter', label: 'Hiver 18°', deg: 18, color: '#D97706', dash: '3 2', width: 1.6 },
-                          ].map((r) => {
+                          const solarBeamSpecs =
+                            solarSector === 'south'
+                              ? [
+                                  { id: 'summer', label: 'Été 65°', deg: 65, color: '#0F766E', dash: '5 3', width: 1.4 },
+                                  { id: 'equinox', label: 'Équinoxe 41°', deg: 41, color: '#EAB308', dash: undefined, width: 1.6 },
+                                  { id: 'winter', label: 'Hiver 18°', deg: 18, color: '#D97706', dash: '3 2', width: 1.6 },
+                                ]
+                              : solarSector === 'eastwest'
+                              ? [
+                                  {
+                                    id: 'summer',
+                                    label: `Été ~50° (${dirCode === 'E' ? 'matin' : 'soir'})`,
+                                    deg: 50,
+                                    color: '#0F766E',
+                                    dash: '5 3',
+                                    width: 1.4,
+                                  },
+                                  {
+                                    id: 'equinox',
+                                    label: 'Équinoxe ~30°',
+                                    deg: 30,
+                                    color: '#EAB308',
+                                    dash: undefined,
+                                    width: 1.6,
+                                  },
+                                  {
+                                    id: 'winter',
+                                    label: 'Hiver ~14°',
+                                    deg: 14,
+                                    color: '#D97706',
+                                    dash: '3 2',
+                                    width: 1.5,
+                                  },
+                                ]
+                              : [];
+
+                          const rays = solarBeamSpecs.map((r) => {
                             const rad = (r.deg * Math.PI) / 180;
                             const slope = Math.tan(rad);
-                            const hasNeighbor = activeDist !== null && activeFacingH !== null && nbX + 40 < svgW;
                             const sunHitHeightM =
                               activeDist !== null ? hAppart + activeDist * slope : Infinity;
-                            const blocked = hasNeighbor && sunHitHeightM < (activeFacingH ?? 0);
+                            const neighborRoofRelSubject = (activeFacingH ?? 0) + activeGroundDelta;
+                            const blocked =
+                              hasNeighborDrawn && sunHitHeightM < neighborRoofRelSubject;
 
                             if (blocked) {
                               const hitY = Math.max(
                                 nbTopY + 1,
-                                Math.min(groundY - 2, groundY - sunHitHeightM * scaleY)
+                                Math.min(nbGroundY - 2, subjGroundY - sunHitHeightM * scaleY)
                               );
                               return {
                                 ...r,
                                 blocked: true,
                                 x2: nbX,
                                 y2: hitY,
-                                labelX: subjRightX + gapPx * 0.64,
-                                labelY: Math.min(groundY - 14, Math.max(30, hitY - 10)),
+                                labelX: subjRightX + gapPx * 0.56,
+                                labelY: Math.min(nbGroundY - 14, Math.max(28, hitY - 9)),
                               };
                             }
 
-                            const svgRisePerPx =
-                              activeDist !== null && activeDist > 0
-                                ? (scaleY / effScaleX) * slope
-                                : slope;
-                            const maxDxByTop = Math.max(20, (winY - 16) / Math.max(0.05, svgRisePerPx));
+                            const svgRisePerPx = (scaleY / scaleX) * slope;
+                            const maxDxByTop = Math.max(18, (winY - 16) / Math.max(0.05, svgRisePerPx));
                             const maxDxByRight = svgW - 14 - subjRightX;
                             const dx = Math.min(maxDxByTop, maxDxByRight);
                             const x2 = subjRightX + dx;
                             const y2 = winY - dx * svgRisePerPx;
-
-                            const lx =
-                              r.id === 'summer'
-                                ? Math.min(svgW - 52, subjRightX + Math.min(dx * 0.72, 90))
-                                : Math.min(svgW - 62, x2 - 48);
-                            const ly =
-                              r.id === 'summer'
-                                ? Math.max(24, y2 + 12)
-                                : Math.max(24, y2 + 14);
 
                             return {
                               ...r,
                               blocked: false,
                               x2,
                               y2,
-                              labelX: lx,
-                              labelY: ly,
+                              labelX:
+                                r.id === 'summer'
+                                  ? Math.min(svgW - 64, subjRightX + Math.min(dx * 0.72, 82))
+                                  : Math.min(svgW - 76, x2 - 44),
+                              labelY: Math.max(22, y2 + 13),
                             };
                           });
 
@@ -903,7 +1328,7 @@ export function DvfDetailDrawer({
                                 viewBox={`0 0 ${svgW} ${svgH}`}
                                 className="w-full h-auto rounded border border-slate-100"
                                 role="img"
-                                aria-label="Coupe architecturale 3D vis-à-vis et ensoleillement"
+                                aria-label="Coupe architecturale 3D vis-à-vis et ensoleillement à l'échelle 1:1"
                               >
                                 <defs>
                                   <linearGradient id="archSkyGrad" x1="0" y1="0" x2="0" y2="1">
@@ -918,14 +1343,14 @@ export function DvfDetailDrawer({
                                     patternUnits="userSpaceOnUse"
                                     patternTransform="rotate(45)"
                                   >
-                                    <line x1="0" y1="0" x2="0" y2="6" stroke="#64748B" strokeWidth="1.2" strokeOpacity="0.24" />
+                                    <line x1="0" y1="0" x2="0" y2="6" stroke="#64748B" strokeWidth="1.2" strokeOpacity="0.22" />
                                   </pattern>
                                 </defs>
 
-                                <rect x={0} y={0} width={svgW} height={groundY} fill="url(#archSkyGrad)" />
+                                <rect x={0} y={0} width={svgW} height={subjGroundY} fill="url(#archSkyGrad)" />
 
                                 {[10, 20, 30].map((m) => {
-                                  const gy = groundY - m * scaleY;
+                                  const gy = subjGroundY - m * scaleY;
                                   if (gy < 18) return null;
                                   return (
                                     <g key={m}>
@@ -950,50 +1375,51 @@ export function DvfDetailDrawer({
                                   );
                                 })}
 
-                                {activeDist !== null && activeFacingH !== null && (
-                                  <polygon
-                                    points={`${subjRightX},${winY} ${nbX},${nbTopY} ${svgW},14 ${subjRightX},14`}
-                                    fill="#BAE6FD"
-                                    fillOpacity={0.28}
-                                  />
-                                )}
+                                {/* Exact Open-Sky Sector Wedge */}
+                                <polygon points={skyWedgePoints} fill="#BAE6FD" fillOpacity={0.3} />
 
-                                {activeDist !== null && activeFacingH !== null && (
+                                {/* Winter shadow polygon (South & East/West exposures only) */}
+                                {solarSector !== 'north' && hasNeighborDrawn && winterShadowHeightM > 0 && (
                                   <polygon
-                                    points={`${nbX},${nbTopY} ${nbX},${groundY} ${subjRightX},${groundY} ${subjRightX},${clampedShadowTopY}`}
+                                    points={`${nbX},${nbTopY} ${nbX},${nbGroundY} ${subjRightX},${subjGroundY} ${subjRightX},${clampedShadowTopY}`}
                                     fill="url(#winterShadowHatch)"
                                   />
                                 )}
 
-                                <rect x={0} y={groundY} width={svgW} height={svgH - groundY} fill="#F1F5F9" />
-                                <line x1={12} x2={svgW - 12} y1={groundY} y2={groundY} stroke="#64748B" strokeWidth={1.6} />
-                                {activeDist !== null && activeDist >= 8 && (
-                                  <line
-                                    x1={subjRightX + 8}
-                                    x2={nbX - 8}
-                                    y1={groundY + 12}
-                                    y2={groundY + 12}
-                                    stroke="#94A3B8"
-                                    strokeWidth={1}
-                                    strokeDasharray="6 4"
-                                  />
-                                )}
+                                {/* Terrain / Ground profile (handles terrain slope if groundDeltaM !== 0) */}
+                                <polygon
+                                  points={`0,${subjGroundY} ${subjRightX},${subjGroundY} ${nbX},${nbGroundY} ${svgW},${nbGroundY} ${svgW},${svgH} 0,${svgH}`}
+                                  fill="#F1F5F9"
+                                />
+                                <polyline
+                                  points={`12,${subjGroundY} ${subjRightX},${subjGroundY} ${nbX},${nbGroundY} ${svgW - 12},${nbGroundY}`}
+                                  fill="none"
+                                  stroke="#64748B"
+                                  strokeWidth={1.6}
+                                />
+
+                                {/* Scale info badge */}
+                                <text x={svgW - 14} y={18} textAnchor="end" className="fill-slate-500 text-[9px] font-mono">
+                                  {isBrokenHorizontal
+                                    ? 'Échelle H comprimée (> 42 m)'
+                                    : 'Coupe à l’échelle 1:1 (H = V)'}
+                                </text>
 
                                 {bdTopo.adjoiningCount > 0 && (
                                   <g>
                                     <rect
-                                      x={subjX - 40}
-                                      y={subjTopY + 16}
-                                      width={40}
-                                      height={subjH - 16}
+                                      x={subjX - 38}
+                                      y={subjTopY + 14}
+                                      width={38}
+                                      height={Math.max(18, subjH - 14)}
                                       fill="#E2E8F0"
                                       fillOpacity={0.55}
                                       stroke="#CBD5E1"
                                       strokeWidth={1}
                                     />
                                     <text
-                                      x={subjX - 20}
-                                      y={groundY - 8}
+                                      x={subjX - 19}
+                                      y={subjGroundY - 8}
                                       textAnchor="middle"
                                       className="fill-slate-600 text-[8px] font-mono font-medium"
                                     >
@@ -1006,25 +1432,25 @@ export function DvfDetailDrawer({
                                 {activeVeg && (
                                   <g>
                                     <line
-                                      x1={subjRightX + Math.min(gapPx * 0.28, 30)}
-                                      x2={subjRightX + Math.min(gapPx * 0.28, 30)}
-                                      y1={groundY}
-                                      y2={groundY - 18}
+                                      x1={subjRightX + Math.min(gapPx * 0.3, 24)}
+                                      x2={subjRightX + Math.min(gapPx * 0.3, 24)}
+                                      y1={subjGroundY}
+                                      y2={subjGroundY - 16}
                                       stroke="#15803D"
                                       strokeWidth={1.8}
                                     />
                                     <circle
-                                      cx={subjRightX + Math.min(gapPx * 0.28, 30)}
-                                      cy={groundY - 24}
-                                      r={10}
+                                      cx={subjRightX + Math.min(gapPx * 0.3, 24)}
+                                      cy={subjGroundY - 22}
+                                      r={9}
                                       fill="#22C55E"
                                       fillOpacity={0.28}
                                       stroke="#15803D"
                                       strokeWidth={1.2}
                                     />
                                     <text
-                                      x={subjRightX + Math.min(gapPx * 0.28, 30)}
-                                      y={groundY - 38}
+                                      x={subjRightX + Math.min(gapPx * 0.3, 24)}
+                                      y={subjGroundY - 34}
                                       textAnchor="middle"
                                       className="fill-[#15803D] text-[8px] font-semibold"
                                     >
@@ -1036,7 +1462,7 @@ export function DvfDetailDrawer({
                                 {/* SUBJECT BUILDING */}
                                 <g>
                                   <polygon
-                                    points={`${subjX + 6},${subjTopY - roofCapPx} ${subjRightX - 6},${subjTopY - roofCapPx} ${subjRightX},${subjTopY} ${subjX},${subjTopY}`}
+                                    points={`${subjX + 5},${subjTopY - roofCapPx} ${subjRightX - 5},${subjTopY - roofCapPx} ${subjRightX},${subjTopY} ${subjX},${subjTopY}`}
                                     fill="#334155"
                                   />
                                   <rect
@@ -1049,7 +1475,7 @@ export function DvfDetailDrawer({
                                     strokeWidth={2}
                                   />
                                   {Array.from({ length: subjFloorsCount }).map((_, flIdx) => {
-                                    const fy = groundY - (flIdx + 1) * floorH;
+                                    const fy = subjGroundY - (flIdx + 1) * floorH;
                                     const isTarget = flIdx === targetFloor;
                                     return (
                                       <g key={flIdx}>
@@ -1057,18 +1483,18 @@ export function DvfDetailDrawer({
                                           <line
                                             x1={subjX + 2}
                                             x2={subjRightX - 2}
-                                            y1={groundY - flIdx * floorH}
-                                            y2={groundY - flIdx * floorH}
+                                            y1={subjGroundY - flIdx * floorH}
+                                            y2={subjGroundY - flIdx * floorH}
                                             stroke="#E2E8F0"
                                             strokeWidth={0.8}
                                           />
                                         )}
-                                        {[14, 44, 74].map((wx, wIdx) => (
+                                        {[11, 35, 59].map((wx, wIdx) => (
                                           <rect
                                             key={wIdx}
                                             x={subjX + wx}
                                             y={fy + floorH * 0.25}
-                                            width={14}
+                                            width={12}
                                             height={Math.max(4, floorH * 0.5)}
                                             rx={1}
                                             fill={isTarget ? '#1D4ED8' : '#CBD5E1'}
@@ -1090,10 +1516,10 @@ export function DvfDetailDrawer({
                                 </g>
 
                                 {/* FACING NEIGHBOR ON SELECTED FACADE */}
-                                {activeDist !== null && activeFacingH !== null && nbX + 40 < svgW ? (
+                                {hasNeighborDrawn ? (
                                   <g>
                                     <polygon
-                                      points={`${nbX + 5},${nbTopY - roofCapPx + 2} ${Math.min(svgW - 16, nbX + nbW - 5)},${nbTopY - roofCapPx + 2} ${Math.min(svgW - 10, nbX + nbW)},${nbTopY} ${nbX},${nbTopY}`}
+                                      points={`${nbX + 5},${nbTopY - roofCapPx + 2} ${Math.min(svgW - 14, nbX + nbW - 5)},${nbTopY - roofCapPx + 2} ${Math.min(svgW - 10, nbX + nbW)},${nbTopY} ${nbX},${nbTopY}`}
                                       fill="#475569"
                                     />
                                     <rect
@@ -1107,25 +1533,25 @@ export function DvfDetailDrawer({
                                     />
                                     {Array.from({ length: nbFloors }).map((_, flIdx) => {
                                       const nFloorH = nbH / nbFloors;
-                                      const fy = groundY - (flIdx + 1) * nFloorH;
+                                      const fy = nbGroundY - (flIdx + 1) * nFloorH;
                                       return (
                                         <g key={flIdx}>
                                           {flIdx > 0 && (
                                             <line
                                               x1={nbX + 2}
                                               x2={Math.min(svgW - 12, nbX + nbW - 2)}
-                                              y1={groundY - flIdx * nFloorH}
-                                              y2={groundY - flIdx * nFloorH}
+                                              y1={nbGroundY - flIdx * nFloorH}
+                                              y2={nbGroundY - flIdx * nFloorH}
                                               stroke="#E2E8F0"
                                               strokeWidth={0.75}
                                             />
                                           )}
-                                          {[14, 44].map((wx, wIdx) => (
+                                          {[11, 35].map((wx, wIdx) => (
                                             <rect
                                               key={wIdx}
                                               x={nbX + wx}
                                               y={fy + nFloorH * 0.25}
-                                              width={13}
+                                              width={11}
                                               height={Math.max(4, nFloorH * 0.48)}
                                               rx={1}
                                               fill="#CBD5E1"
@@ -1144,20 +1570,29 @@ export function DvfDetailDrawer({
                                       Face {activeDir ?? ''} ({activeFacingH} m · {nbFloors} niv.)
                                     </text>
 
+                                    {/* Ground scale break indicator when distance > 42m */}
+                                    {isBrokenHorizontal && (
+                                      <g>
+                                        <rect x={subjRightX + gapPx / 2 - 8} y={subjGroundY - 6} width={16} height={12} fill="#F1F5F9" />
+                                        <line x1={subjRightX + gapPx / 2 - 4} x2={subjRightX + gapPx / 2 + 1} y1={subjGroundY + 5} y2={subjGroundY - 5} stroke="#475569" strokeWidth={1.4} />
+                                        <line x1={subjRightX + gapPx / 2 + 1} x2={subjRightX + gapPx / 2 + 6} y1={subjGroundY + 5} y2={subjGroundY - 5} stroke="#475569" strokeWidth={1.4} />
+                                      </g>
+                                    )}
+
                                     <line
-                                      x1={subjRightX + 4}
-                                      x2={nbX - 4}
-                                      y1={groundY + 20}
-                                      y2={groundY + 20}
+                                      x1={subjRightX + 3}
+                                      x2={nbX - 3}
+                                      y1={groundBaseY + 20}
+                                      y2={groundBaseY + 20}
                                       stroke="#0F172A"
                                       strokeWidth={1.3}
                                     />
-                                    <polygon points={`${subjRightX + 4},${groundY + 20} ${subjRightX + 10},${groundY + 17} ${subjRightX + 10},${groundY + 23}`} fill="#0F172A" />
-                                    <polygon points={`${nbX - 4},${groundY + 20} ${nbX - 10},${groundY + 17} ${nbX - 10},${groundY + 23}`} fill="#0F172A" />
+                                    <polygon points={`${subjRightX + 3},${groundBaseY + 20} ${subjRightX + 9},${groundBaseY + 17} ${subjRightX + 9},${groundBaseY + 23}`} fill="#0F172A" />
+                                    <polygon points={`${nbX - 3},${groundBaseY + 20} ${nbX - 9},${groundBaseY + 17} ${nbX - 9},${groundBaseY + 23}`} fill="#0F172A" />
                                     <rect
-                                      x={subjRightX + gapPx / 2 - 34}
-                                      y={groundY + 11}
-                                      width={68}
+                                      x={subjRightX + gapPx / 2 - 28}
+                                      y={groundBaseY + 11}
+                                      width={56}
                                       height={18}
                                       rx={3}
                                       fill="#FFFFFF"
@@ -1165,7 +1600,7 @@ export function DvfDetailDrawer({
                                     />
                                     <text
                                       x={subjRightX + gapPx / 2}
-                                      y={groundY + 23}
+                                      y={groundBaseY + 23}
                                       textAnchor="middle"
                                       className="fill-slate-900 text-[10px] font-mono font-bold"
                                     >
@@ -1174,13 +1609,55 @@ export function DvfDetailDrawer({
                                   </g>
                                 ) : (
                                   <text
-                                    x={subjRightX + 135}
-                                    y={groundY + 22}
+                                    x={subjRightX + 145}
+                                    y={groundBaseY + 22}
                                     textAnchor="middle"
                                     className="fill-[#0F766E] text-[10px] font-semibold"
                                   >
                                     Façade {activeDir ?? ''} dégagée (&gt; 100 m sans vis-à-vis)
                                   </text>
+                                )}
+
+                                {/* Obstruction angle sightline */}
+                                {hasNeighborDrawn && (
+                                  <g>
+                                    <line
+                                      x1={subjRightX}
+                                      y1={winY}
+                                      x2={nbX}
+                                      y2={nbTopY}
+                                      stroke={solarSector === 'north' ? '#1D4ED8' : '#64748B'}
+                                      strokeWidth={solarSector === 'north' ? 1.8 : 1.1}
+                                      strokeDasharray={solarSector === 'north' ? '4 2' : '2 3'}
+                                    />
+                                    {solarSector === 'north' && (() => {
+                                      const pillX = subjRightX + gapPx * 0.5;
+                                      const pillY = Math.min(subjGroundY - 14, Math.max(26, (winY + nbTopY) / 2 - 8));
+                                      return (
+                                        <g>
+                                          <rect
+                                            x={pillX - 64}
+                                            y={pillY - 10}
+                                            width={128}
+                                            height={15}
+                                            rx={3}
+                                            fill="#FFFFFF"
+                                            fillOpacity={0.92}
+                                            stroke="#BFDBFE"
+                                            strokeWidth={0.8}
+                                          />
+                                          <text
+                                            x={pillX}
+                                            y={pillY + 1}
+                                            textAnchor="middle"
+                                            className="fill-[#1D4ED8] text-[9.5px] font-mono font-semibold"
+                                          >
+                                            Masque {activeObstructionAngle}° · Ciel {Math.max(0, 90 - activeObstructionAngle)}°
+                                          </text>
+                                        </g>
+                                      );
+                                    })()}
+                                  </g>
                                 )}
 
                                 {rays.map((ray) => (
@@ -1210,25 +1687,38 @@ export function DvfDetailDrawer({
                                 ))}
                               </svg>
 
-                              {/* Compact Legend */}
-                              <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px] text-slate-600">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className="w-3 h-0.5 bg-[#D97706] inline-block" />
-                                  Soleil d’hiver (18°)
-                                </span>
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className="w-3 h-0.5 bg-[#EAB308] inline-block" />
-                                  Équinoxe (41°)
-                                </span>
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className="w-3 h-0.5 bg-[#0F766E] inline-block" />
-                                  Soleil d’été (65°)
-                                </span>
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className="w-3 h-3 bg-slate-200 border border-slate-300 inline-block rounded-xs" />
-                                  Zone d’ombre hivernale
-                                </span>
-                              </div>
+                              {/* Orientation-aware Compact Legend */}
+                              {solarSector === 'north' ? (
+                                <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px] text-slate-600">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="w-3 h-0.5 bg-[#1D4ED8] inline-block" />
+                                    Rayon d’obstruction réel ({activeObstructionAngle}°)
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="w-3 h-3 bg-sky-100 border border-sky-300 inline-block rounded-xs" />
+                                    Secteur de ciel libre (lumière diffuse {dirCode === 'N' ? 'toute l’année' : '· rasant été'})
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px] text-slate-600">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="w-3 h-0.5 bg-[#D97706] inline-block" />
+                                    {solarSector === 'south' ? 'Soleil d’hiver (18°)' : 'Soleil bas d’hiver (~14°)'}
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="w-3 h-0.5 bg-[#EAB308] inline-block" />
+                                    {solarSector === 'south' ? 'Équinoxe (41°)' : 'Équinoxe (~30°)'}
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="w-3 h-0.5 bg-[#0F766E] inline-block" />
+                                    {solarSector === 'south' ? 'Soleil d’été (65°)' : 'Soleil d’été (~50°)'}
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="w-3 h-3 bg-slate-200 border border-slate-300 inline-block rounded-xs" />
+                                    Zone d’ombre hivernale
+                                  </span>
+                                </div>
+                              )}
 
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
                                 <div className="p-2.5 bg-slate-50 border border-slate-200 rounded">
@@ -1266,8 +1756,10 @@ export function DvfDetailDrawer({
                                       : `${activeObstructionAngle}° (H = ${hAppart} m)`}
                                   </div>
                                   <div className="text-[11px] text-slate-600 mt-0.5">
-                                    {winterBlockedFloors === 0
-                                      ? 'Soleil d’hiver 18° dégagé'
+                                    {solarSector === 'north'
+                                      ? `Lumière diffuse (${dirCode}) · ciel ${Math.max(0, 90 - activeObstructionAngle)}°`
+                                      : winterBlockedFloors === 0
+                                      ? 'Soleil d’hiver dégagé'
                                       : `Ombre hiver RDC → ${winterBlockedFloors === 1 ? '1er' : `${winterBlockedFloors}e`}`}
                                   </div>
                                 </div>
@@ -1328,7 +1820,12 @@ export function DvfDetailDrawer({
                               const facCat = classifyVisibility(fac.distanceM);
                               const facAngle =
                                 fac.distanceM !== null && fac.facingHeightM !== null
-                                  ? computeObstructionAngleForFloor(fac.facingHeightM, fac.distanceM, evalFloor)
+                                  ? computeObstructionAngleForFloor(
+                                      fac.facingHeightM,
+                                      fac.distanceM,
+                                      evalFloor,
+                                      fac.groundDeltaM ?? 0
+                                    )
                                   : 0;
                               const catColor =
                                 facCat === 'degage'
@@ -1476,7 +1973,12 @@ export function DvfDetailDrawer({
                                 NE: 'Soleil rasant matin (été)',
                                 NO: 'Soleil rasant soir (été)',
                               };
-                              const nbAngle = computeObstructionAngleForFloor(nb.heightM, nb.distanceM, evalFloor);
+                              const nbAngle = computeObstructionAngleForFloor(
+                                nb.heightM,
+                                nb.distanceM,
+                                evalFloor,
+                                nb.groundDeltaM ?? 0
+                              );
                               const nbCat = classifyVisibility(nb.distanceM);
                               const severity =
                                 nbAngle >= 45

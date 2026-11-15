@@ -16,6 +16,7 @@ import {
   computeBdTopoVisAVis,
   computeNaturalLuminosityScore,
   computeObstructionAngleForFloor,
+  decodeIgnMaterial,
   wgs84ToLambert93,
 } from './enrichment';
 
@@ -566,3 +567,179 @@ test('computeBdTopoVisAVis sanitizes ANFR 70m antenna heights, skips h=0 overhan
     `ANFR 70.1m without floor count should be clamped to 21m, got ${eastFacade?.facingHeightM}`
   );
 });
+
+test('multi-disposition DVF deeds under same id_mutation stay distinct non-block sales with unique IDs', () => {
+  const csv = [
+    SAMPLE_HEADER,
+    '2024-777,2024-07-10,000001,Vente,390000,70,,RUE OLIVIER DE SERRES,6889,75015,75115,Paris 15e Arrondissement,75,,,75115000BL0014,,,11,38.0,,,,,,,,,1,2,Appartement,38,2,,,,,,2.294779,48.833676',
+    '2024-777,2024-07-10,000002,Vente,410000,70,,RUE OLIVIER DE SERRES,6889,75015,75115,Paris 15e Arrondissement,75,,,75115000BL0014,,,12,40.0,,,,,,,,,1,2,Appartement,40,2,,,,,,2.294779,48.833676',
+  ].join('\n');
+
+  const parsed = parseGeoDvfCsv(csv);
+  const res = aggregateAndFilterDvfRows(parsed, {
+    centerLat: 48.833676,
+    centerLon: 2.294779,
+    radiusMeters: 200,
+    minSurface: 35,
+    maxSurface: 45,
+    rooms: [1, 2],
+    years: [2024],
+    includeBlockSales: false,
+  });
+
+  assert.equal(res.excludedBlockSalesCount, 0);
+  assert.equal(res.transactions.length, 2);
+  assert.notEqual(res.transactions[0].id, res.transactions[1].id);
+  assert.equal(res.transactions[0].isBlockSale, false);
+  assert.equal(res.transactions[1].isBlockSale, false);
+});
+
+test('decodeIgnMaterial maps IGN BD TOPO wall & roof codes cleanly and handles indeterminate codes', () => {
+  assert.equal(decodeIgnMaterial('24', 'wall'), 'Meulière / Brique');
+  assert.equal(decodeIgnMaterial('40', 'wall'), 'Brique');
+  assert.equal(decodeIgnMaterial('30', 'wall'), 'Béton');
+  assert.equal(decodeIgnMaterial('30', 'roof'), 'Zinc / Aluminium');
+  assert.equal(decodeIgnMaterial('23', 'roof'), 'Ardoise / Zinc / Aluminium');
+  assert.equal(decodeIgnMaterial('00', 'wall'), null);
+  assert.equal(decodeIgnMaterial(null, 'wall'), null);
+  assert.equal(decodeIgnMaterial('PIERRE', 'wall'), 'PIERRE');
+});
+
+test('computeBdTopoVisAVis keeps measured low roof height (4.1m) instead of multiplying parcel-inherited floors', () => {
+  const features = [
+    {
+      id: 'courtyard-annex',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[2.2947, 48.8336], [2.29485, 48.8336], [2.29485, 48.83372], [2.2947, 48.83372], [2.2947, 48.8336]]],
+      },
+      properties: {
+        hauteur: 4.1,
+        nombre_d_etages: 5, // Parcel-inherited floor tag on low 4.1m courtyard building
+        altitude_minimale_sol: 40,
+      },
+    },
+    {
+      id: 'facing-tall-on-slope',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[2.29502, 48.8336], [2.29518, 48.8336], [2.29518, 48.83372], [2.29502, 48.83372], [2.29502, 48.8336]]],
+      },
+      properties: {
+        hauteur: 18,
+        nombre_d_etages: 6,
+        altitude_minimale_sol: 43, // 3m uphill slope
+      },
+    },
+  ];
+
+  const info = computeBdTopoVisAVis(features, 48.83366, 2.29477, [], 0, { includePlanView: true });
+  assert.equal(info.subjectHeightM, 4.1);
+  assert.equal(info.subjectFloors, 1);
+  assert.ok(info.planView && info.planView.buildings.length === 2, 'planView should include subject + neighbor');
+
+  const eastFac = info.facades.find((f) => f.direction === 'E');
+  assert.ok(eastFac && eastFac.distanceM !== null);
+  assert.equal(eastFac?.groundDeltaM, 3);
+
+  // Slope-adjusted angle > flat angle
+  const angleFlat = computeObstructionAngleForFloor(18, 12, 0, 0);
+  const angleUphill = computeObstructionAngleForFloor(18, 12, 0, 3);
+  assert.ok(angleUphill > angleFlat);
+});
+
+test('computeBdTopoVisAVis detects opposite wing of touching L-shaped neighbor and partial facade obstructions (<40%)', () => {
+  // Subject rectangle on West, facing East across a ~12m open street/courtyard.
+  // An L-shaped neighbor touches Subject's North edge AND wraps down East ~12m away on the southern 30% of East facade!
+  const features = [
+    {
+      id: 'subject',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [2.2946, 48.8335],
+            [2.29475, 48.8335],
+            [2.29475, 48.8337], // 22m long N-S
+            [2.2946, 48.8337],
+            [2.2946, 48.8335],
+          ],
+        ],
+      },
+      properties: { hauteur: 18, nombre_d_etages: 6 },
+    },
+    {
+      id: 'touching-L-neighbor',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [2.2946, 48.8337], // touches subject north edge!
+            [2.29505, 48.8337],
+            [2.29505, 48.8335],
+            [2.29492, 48.8335], // ~12.5m East of subject East wall
+            [2.29492, 48.83364],
+            [2.29475, 48.83364],
+            [2.29475, 48.8337],
+            [2.2946, 48.8337],
+          ],
+        ],
+      },
+      properties: { hauteur: 18, nombre_d_etages: 6 },
+    },
+  ];
+
+  const info = computeBdTopoVisAVis(features, 48.8336, 2.29467);
+  const eastFac = info.facades.find((f) => f.direction === 'E');
+  assert.ok(eastFac, 'East facade must be analyzed');
+  assert.ok(
+    eastFac?.distanceM !== null && eastFac.distanceM >= 10 && eastFac.distanceM <= 16,
+    `Opposite wing of touching L-shaped neighbor (~12.5m) must NOT be skipped, got ${eastFac?.distanceM}`
+  );
+  assert.equal(eastFac?.facingBuildingId, 'touching-L-neighbor');
+});
+
+test('computeNaturalLuminosityScore keeps openDirectionsCount and crossLightLabel consistent', () => {
+  const lum = computeNaturalLuminosityScore({
+    subjectHeightM: 18,
+    subjectFloors: 6,
+    subjectDwellings: null,
+    subjectWallMaterial: null,
+    subjectRoofMaterial: null,
+    altitudeMinSolM: null,
+    altitudeMaxToitM: null,
+    adjoiningCount: 2,
+    neighborCount60m: 2,
+    principalVisAVisDistanceM: 14,
+    principalFacingHeightM: 18,
+    principalDirection: 'S',
+    effectiveVisAVisDistanceM: 11,
+    closestNeighborDistanceM: 5,
+    closestNeighborHeightM: 18,
+    tallestNeighborHeightM: 18,
+    maxObstructionAngleDeg: 60,
+    skyOpennessPct: 50,
+    openDirectionsCount: 1,
+    visibilityCategory: 'modere',
+    vegetationScreensCount: 0,
+    facades: [
+      {
+        direction: 'S',
+        isCourtyard: false,
+        facadeLengthM: 12,
+        distanceM: 14,
+        facingBuildingId: 'n1',
+        facingHeightM: 18,
+        facingFloors: 6,
+        obstructionAngleDeg: 35,
+        vegetationScreen: null,
+      },
+    ],
+    nearestNeighbors: [],
+  });
+  assert.ok(
+    lum.crossLightLabel.includes('Mono-orienté'),
+    `Expected Mono-orienté for 1 open direction, got "${lum.crossLightLabel}"`
+  );
+});
+
