@@ -459,7 +459,6 @@ async function fetchBdTopoContext(
   lat: number,
   lon: number
 ): Promise<{ buildings: ParsedBdTopoBuilding[]; vegetation: ParsedVegetationZone[] } | null> {
-  // Reuse already-fetched sector dataset only if point + 125m ray horizon fits strictly inside cached margin
   for (const entry of sectorBdTopoCache.values()) {
     const dist = haversineDistanceMeters(lat, lon, entry.centerLat, entry.centerLon);
     if (dist + 125 <= entry.marginMeters) {
@@ -469,8 +468,8 @@ async function fetchBdTopoContext(
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const dLat = 0.0013; // ~144m
-      const dLon = 0.0019; // ~139m
+      const dLat = 0.0013;
+      const dLon = 0.0019;
       const bbox = `${lat - dLat},${lon - dLon},${lat + dLat},${lon + dLon},urn:ogc:def:crs:EPSG::4326`;
 
       const [bRes, vRes] = await Promise.allSettled([
@@ -803,12 +802,10 @@ async function startServer() {
         return res.json(cached);
       }
 
-      // Resolve BAN ID for this specific apartment building
       const searchQuery = [address, postalCode].filter(Boolean).join(' ');
       const banFeature = searchQuery ? await geocodeAddress(searchQuery).catch(() => null) : null;
       const banId = banFeature?.banId ?? null;
 
-      // Parallel fetch across BDNB, ADEME DPE, BD TOPO 3D, Solar PVGIS, Météo-France, OSM
       const [bdnbRes, dpeRes, bdTopoRaw, solarRes, meteoRes, osmRes] = await Promise.all([
         banId ? fetchBdnbForBanId(banId) : Promise.resolve(null),
         banId ? fetchAdemeDpeForBanId(banId, surfaceBati) : Promise.resolve({ totalAtAddress: 0, records: [] }),
@@ -818,8 +815,6 @@ async function startServer() {
         fetchOsmContext(lat, lon),
       ]);
 
-      // Compute building-level BD TOPO baseline at mid-building so luminosity & sky openness stay 100% consistent with sector metrics;
-      // floor-specific angles & sky openness dynamically update in the UI drawer using DPE floor or interactive floor selector.
       const bdTopoRes: BdTopo3DInfo | null = bdTopoRaw
         ? computeBdTopoVisAVisFromPrepared(
             bdTopoRaw.buildings,
@@ -1002,7 +997,6 @@ async function startServer() {
         sectorBdTopoCache.set(boxKey, cachedSector);
       }
 
-      // Compute Lambert-93 facade vis-a-vis & luminosity per unique coordinate pair
       const coordMemo = new Map<string, ReturnType<typeof computeBdTopoVisAVisFromPrepared>>();
       const metricsList: TransactionEnvironmentMetrics[] = [];
 

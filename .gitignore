@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Cache de documentation Google Maps (genere)
+.gmp_cache/

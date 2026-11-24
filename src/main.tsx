@@ -2,7 +2,6 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Google Maps Platform Tier 1 quota/auth defense
 (window as unknown as Record<string, unknown>).gm_authFailure = () => {
   window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
 };

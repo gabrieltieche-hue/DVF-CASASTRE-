@@ -282,7 +282,6 @@ export function aggregateAndFilterDvfRows(
     'centerLat' | 'centerLon' | 'radiusMeters' | 'minSurface' | 'maxSurface' | 'rooms' | 'years' | 'includeBlockSales'
   >
 ): AggregationOutput {
-  // Group all rows by (id_mutation, numero_disposition) to understand the exact scope of each notary disposition
   const byMutation = new Map<string, { idMutation: string; rows: RawDvfRow[] }>();
   for (const row of rows) {
     const disp = row.numero_disposition || '000001';
@@ -302,7 +301,6 @@ export function aggregateAndFilterDvfRows(
 
   const usedTxIds = new Set<string>();
   for (const { idMutation, rows: mutRows } of byMutation.values()) {
-    // Count main units vs annexes (Dépendance) in the entire disposition
     const mainUnits = mutRows.filter(
       (r) =>
         r.type_local === 'Appartement' ||
@@ -311,7 +309,6 @@ export function aggregateAndFilterDvfRows(
     );
     const dependances = mutRows.filter((r) => r.type_local === 'Dépendance');
 
-    // Deduplicate identical apartment rows within the same disposition (e.g., split cadastral lots)
     const uniqueAptMap = new Map<string, RawDvfRow>();
     for (const r of mainUnits) {
       if (r.type_local !== 'Appartement') continue;
@@ -513,7 +510,6 @@ export function computePriceBrackets(transactions: DvfTransaction[]): PriceBrack
   const end = Math.ceil(p90 / step) * step;
 
   const brackets: PriceBracket[] = [];
-  // Below start bucket if outliers exist
   const below = transactions.filter((t) => t.pricePerSqm < start);
   if (below.length > 0) {
     brackets.push({
@@ -637,13 +633,10 @@ export function computePricePrediction(
   const lastYear = sorted[sorted.length - 1].year;
   const lastMed = sorted[sorted.length - 1].medianPricePerSqm;
 
-  // Anchor projection smoothly from the last observed year so visual transition is continuous
-  // while reflecting the fitted annualized slope + uncertainty cone widening with sqrt(step)
   const projected: PredictedYearPoint[] = [];
   for (let step = 1; step <= horizonYears; step++) {
     const yr = lastYear + step;
     const rawPred = Math.round(slope * yr + intercept);
-    // Blend 50% regression line + 50% anchored slope from last observed median for realistic local continuity
     const anchoredPred = Math.round(lastMed + slope * step);
     const predictedPricePerSqm = Math.max(1000, Math.round((rawPred + anchoredPred) / 2));
     const margin = Math.max(350, Math.round(rmse * (0.85 + 0.35 * step)));

@@ -846,7 +846,6 @@ export function DvfDetailDrawer({
                           const pv = bdTopo.planView;
                           const pW = 560;
                           const pH = 216;
-                          // Auto-fit subject building + ray endpoints + nearby buildings into viewport around (0, 0)
                           let maxAbsX = 28;
                           let maxAbsY = 20;
                           const subjPoly = pv.buildings.find((b) => b.isSubject);
@@ -871,7 +870,7 @@ export function DvfDetailDrawer({
                           const cySvg = pH / 2;
                           const toSvgPt = (x: number, y: number): [number, number] => [
                             Math.round((cxSvg + x * pxPerMPlan) * 10) / 10,
-                            Math.round((cySvg - y * pxPerMPlan) * 10) / 10, // +Y North -> UP in SVG
+                            Math.round((cySvg - y * pxPerMPlan) * 10) / 10,
                           ];
                           const ringsToPath = (
                             outerRings: Array<Array<[number, number]>>,
@@ -1130,7 +1129,6 @@ export function DvfDetailDrawer({
                           const physDistForScale =
                             activeDist !== null ? Math.min(42, Math.max(4, activeDist)) : 26;
 
-                          // Uniform 1:1 metric scale (same px/m horizontally and vertically up to 42m!)
                           const pxPerM = Math.max(
                             3.8,
                             Math.min(7.2, 178 / maxPhysH, 265 / Math.max(12, physDistForScale))
@@ -1184,7 +1182,6 @@ export function DvfDetailDrawer({
                                 )
                               : 0;
 
-                          // Orientation-aware solar regime for Paris (48.83°N)
                           const dirCode = activeDir ?? 'S';
                           const solarSector: 'south' | 'eastwest' | 'north' =
                             dirCode === 'S' || dirCode === 'SE' || dirCode === 'SO'
@@ -1219,14 +1216,12 @@ export function DvfDetailDrawer({
                           const hasNeighborDrawn =
                             activeDist !== null && activeFacingH !== null && nbX + 30 < svgW;
 
-                          // Exact sky wedge polygon from (subjRightX, winY) past (nbX, nbTopY)
                           const skyWedgePoints = (() => {
                             if (!hasNeighborDrawn) {
                               return `${subjRightX},${winY} ${svgW},${winY} ${svgW},12 ${subjRightX},12`;
                             }
                             const dyObs = winY - nbTopY;
                             if (dyObs <= 0) {
-                              // Apartment sits above neighbor roof -> horizon unobstructed
                               return `${subjRightX},${winY} ${svgW},${winY} ${svgW},12 ${subjRightX},12`;
                             }
                             const obsSlopePx = dyObs / Math.max(1, nbX - subjRightX);

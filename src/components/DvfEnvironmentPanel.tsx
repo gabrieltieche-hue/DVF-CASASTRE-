@@ -29,7 +29,6 @@ export function DvfEnvironmentPanel({
     ? Math.max(1, ...summary.visibilityBuckets.map((b) => b.count))
     : 1;
 
-  // Luminosity comparison bars data
   const activeScore = selectedEnv ? selectedEnv.luminosity.score : summary?.medianLuminosity ?? 0;
   const sectorMedian = summary?.medianLuminosity ?? 0;
   const sectorQ3 = summary?.q3Luminosity ?? 0;

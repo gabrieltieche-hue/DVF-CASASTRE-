@@ -29,11 +29,9 @@ test('haversineDistanceMeters computes accurate micro-distances around 70 rue Ol
 
   assert.equal(Math.round(haversineDistanceMeters(centerLat, centerLon, centerLat, centerLon)), 0);
 
-  // ~111 meters north
   const north = haversineDistanceMeters(centerLat, centerLon, centerLat + 0.001, centerLon);
   assert.ok(north > 105 && north < 118, `Expected ~111m, got ${north}`);
 
-  // ~350 meters away (outside 200m radius)
   const far = haversineDistanceMeters(centerLat, centerLon, centerLat + 0.0032, centerLon);
   assert.ok(far > 340 && far < 370, `Expected ~355m, got ${far}`);
 });
@@ -41,18 +39,12 @@ test('haversineDistanceMeters computes accurate micro-distances around 70 rue Ol
 test('parseGeoDvfCsv and aggregateAndFilterDvfRows filter by room count, surface 35-45m2, radius 200m, and detect block sales', () => {
   const csv = [
     SAMPLE_HEADER,
-    // 1. Valid 2-piece 40m2 with a cave (Dépendance) at ~40m
     '2024-001,2024-05-14,000001,Vente,420000,66,,RUE OLIVIER DE SERRES,6889,75015,75115,Paris 15e Arrondissement,75,,,75115000BL0012,,,14,39.5,,,,,,,,,2,2,Appartement,40,2,,,,,,2.2951,48.8339',
     '2024-001,2024-05-14,000001,Vente,420000,66,,RUE OLIVIER DE SERRES,6889,75015,75115,Paris 15e Arrondissement,75,,,75115000BL0012,,,42,,,,,,,,,,2,3,Dépendance,,0,,,,,,2.2951,48.8339',
-    // 2. Valid Studio (1P) 35m2 (boundary inclusive) at ~120m
     '2023-002,2023-11-02,000001,Vente,350000,12,,RUE DE DANTZIG,2560,75015,75115,Paris 15e Arrondissement,75,,,75115000BM0008,,,5,35.2,,,,,,,,,1,2,Appartement,35,1,,,,,,2.2960,48.8342',
-    // 3. Excluded: 3 pieces 44m2 (wrong room count)
     '2024-003,2024-02-10,000001,Vente,480000,72,,RUE OLIVIER DE SERRES,6889,75015,75115,Paris 15e Arrondissement,75,,,75115000BL0015,,,8,,,,,,,,,,1,2,Appartement,44,3,,,,,,2.2948,48.8337',
-    // 4. Excluded: 2 pieces 46m2 (above 45m2)
     '2024-004,2024-03-20,000001,Vente,500000,68,,RUE OLIVIER DE SERRES,6889,75015,75115,Paris 15e Arrondissement,75,,,75115000BL0013,,,3,,,,,,,,,,1,2,Appartement,46,2,,,,,,2.2949,48.8337',
-    // 5. Excluded: 2 pieces 40m2 but 350m away (outside 200m)
     '2024-005,2024-04-01,000001,Vente,410000,120,,RUE DE LA CONVENTION,2280,75015,75115,Paris 15e Arrondissement,75,,,75115000BK0001,,,9,,,,,,,,,,1,2,Appartement,40,2,,,,,,2.2948,48.8369',
-    // 6. Block sale: two apartments in same mutation 2024-006
     '2024-006,2024-06-15,000001,Vente,1800000,70,,RUE OLIVIER DE SERRES,6889,75015,75115,Paris 15e Arrondissement,75,,,75115000BL0014,,,1,,,,,,,,,,2,2,Appartement,42,2,,,,,,2.294779,48.833676',
     '2024-006,2024-06-15,000001,Vente,1800000,70,,RUE OLIVIER DE SERRES,6889,75015,75115,Paris 15e Arrondissement,75,,,75115000BL0014,,,2,,,,,,,,,,2,2,Appartement,38,1,,,,,,2.294779,48.833676',
   ].join('\n');
@@ -88,7 +80,6 @@ test('parseGeoDvfCsv and aggregateAndFilterDvfRows filter by room count, surface
   assert.equal(stats.medianPricePerSqm, 10250);
   assert.equal(stats.yearlyTrends.length, 2);
 
-  // Including block sales exposes all 4 matching apartment rows
   const withBlocks = aggregateAndFilterDvfRows(parsed, {
     centerLat: 48.833676,
     centerLon: 2.294779,
@@ -234,7 +225,6 @@ test('computeBdTopoVisAVis computes neighbor distance, height, and obstruction a
   assert.equal(info.closestNeighborHeightM, 18);
   assert.ok(info.maxObstructionAngleDeg !== null && info.maxObstructionAngleDeg > 15);
   assert.equal(info.nearestNeighbors[0].direction, 'E');
-  // East neighbor is ~14.7 m away (> 14 m Parisian threshold -> 'degage')
   assert.equal(info.visibilityCategory, classifyVisibility(info.principalVisAVisDistanceM));
 
   const lum = computeNaturalLuminosityScore(info);
@@ -363,13 +353,10 @@ test('wgs84ToLambert93 projects Paris 15e accurately in meters and floor-aware a
   assert.ok(Math.abs(x - 648240) < 60, `Expected Lambert-93 X near 648240, got ${x}`);
   assert.ok(Math.abs(y - 6859520) < 60, `Expected Lambert-93 Y near 6859520, got ${y}`);
 
-  // Floor 7: H_appart = 0.5 + 7 * 2.9 = 20.8 m > facing 18 m -> 0 deg (clear above roof)
   assert.equal(computeObstructionAngleForFloor(18, 12, 7), 0);
-  // Floor 0 (RDC): H_appart = 0.5 m vs facing 18 m at 12 m -> atan(17.5 / 12) ≈ 56 deg
   const rdcAngle = computeObstructionAngleForFloor(18, 12, 0);
   assert.ok(rdcAngle >= 54 && rdcAngle <= 57, `Expected ~56 deg, got ${rdcAngle}`);
 
-  // Parisian thresholds (< 9 / 9-16 / > 16 m)
   assert.equal(classifyVisibility(8.9), 'proche');
   assert.equal(classifyVisibility(9.0), 'modere');
   assert.equal(classifyVisibility(16.0), 'modere');
@@ -378,7 +365,6 @@ test('wgs84ToLambert93 projects Paris 15e accurately in meters and floor-aware a
 });
 
 test('computeBdTopoVisAVis separates open principal street facade from tight courtyard facade', () => {
-  // Parisian block building: mitoyens on North & South, tight courtyard ~6m West, open street ~20m East
   const features = [
     {
       id: 'subject',
@@ -473,7 +459,6 @@ test('computeBdTopoVisAVis separates open principal street facade from tight cou
     info.closestNeighborDistanceM !== null && info.closestNeighborDistanceM <= 7,
     `Expected courtyard <= 7m, got ${info.closestNeighborDistanceM}`
   );
-  // Weighted exposure blends ~21m open street and ~6m courtyard -> ~13-14m (modere)
   assert.ok(
     info.effectiveVisAVisDistanceM !== null &&
       info.effectiveVisAVisDistanceM >= 10 &&
@@ -484,8 +469,6 @@ test('computeBdTopoVisAVis separates open principal street facade from tight cou
 });
 
 test('computeBdTopoVisAVis sanitizes ANFR 70m antenna heights, skips h=0 overhang annexes, and raycasts interior courtyard holes', () => {
-  // Hollow courtyard MultiPolygon building (outer ~28m x 22m, interior courtyard ~8m x 8m)
-  // Plus a 0m entrance canopy overlapping the target point, and an ANFR:650231 neighbor with height=70.1m without floors
   const features = [
     {
       id: 'annex-zero',
@@ -509,7 +492,6 @@ test('computeBdTopoVisAVis sanitizes ANFR 70m antenna heights, skips h=0 overhan
         type: 'MultiPolygon',
         coordinates: [
           [
-            // Outer ring (~26m x 24m)
             [
               [2.2946, 48.83355],
               [2.29495, 48.83355],
@@ -517,7 +499,6 @@ test('computeBdTopoVisAVis sanitizes ANFR 70m antenna heights, skips h=0 overhan
               [2.2946, 48.83377],
               [2.2946, 48.83355],
             ],
-            // Interior courtyard hole (~8m x 8m)
             [
               [2.29472, 48.83362],
               [2.29483, 48.83362],
@@ -552,7 +533,6 @@ test('computeBdTopoVisAVis sanitizes ANFR 70m antenna heights, skips h=0 overhan
     },
   ];
 
-  // Target point sits inside annex-zero (courtyard entrance canopy) & close to hollow-subject
   const info = computeBdTopoVisAVis(features, 48.83366, 2.29477);
   assert.equal(info.subjectHeightM, 21, 'Must pick hollow-subject (21m) instead of 0m annex');
   assert.ok(
@@ -615,7 +595,7 @@ test('computeBdTopoVisAVis keeps measured low roof height (4.1m) instead of mult
       },
       properties: {
         hauteur: 4.1,
-        nombre_d_etages: 5, // Parcel-inherited floor tag on low 4.1m courtyard building
+        nombre_d_etages: 5,
         altitude_minimale_sol: 40,
       },
     },
@@ -628,7 +608,7 @@ test('computeBdTopoVisAVis keeps measured low roof height (4.1m) instead of mult
       properties: {
         hauteur: 18,
         nombre_d_etages: 6,
-        altitude_minimale_sol: 43, // 3m uphill slope
+        altitude_minimale_sol: 43,
       },
     },
   ];
@@ -642,15 +622,12 @@ test('computeBdTopoVisAVis keeps measured low roof height (4.1m) instead of mult
   assert.ok(eastFac && eastFac.distanceM !== null);
   assert.equal(eastFac?.groundDeltaM, 3);
 
-  // Slope-adjusted angle > flat angle
   const angleFlat = computeObstructionAngleForFloor(18, 12, 0, 0);
   const angleUphill = computeObstructionAngleForFloor(18, 12, 0, 3);
   assert.ok(angleUphill > angleFlat);
 });
 
 test('computeBdTopoVisAVis detects opposite wing of touching L-shaped neighbor and partial facade obstructions (<40%)', () => {
-  // Subject rectangle on West, facing East across a ~12m open street/courtyard.
-  // An L-shaped neighbor touches Subject's North edge AND wraps down East ~12m away on the southern 30% of East facade!
   const features = [
     {
       id: 'subject',
@@ -660,7 +637,7 @@ test('computeBdTopoVisAVis detects opposite wing of touching L-shaped neighbor a
           [
             [2.2946, 48.8335],
             [2.29475, 48.8335],
-            [2.29475, 48.8337], // 22m long N-S
+            [2.29475, 48.8337],
             [2.2946, 48.8337],
             [2.2946, 48.8335],
           ],
@@ -674,10 +651,10 @@ test('computeBdTopoVisAVis detects opposite wing of touching L-shaped neighbor a
         type: 'Polygon',
         coordinates: [
           [
-            [2.2946, 48.8337], // touches subject north edge!
+            [2.2946, 48.8337],
             [2.29505, 48.8337],
             [2.29505, 48.8335],
-            [2.29492, 48.8335], // ~12.5m East of subject East wall
+            [2.29492, 48.8335],
             [2.29492, 48.83364],
             [2.29475, 48.83364],
             [2.29475, 48.8337],

@@ -44,7 +44,6 @@ export function DvfChart({
   );
   const prediction = useMemo(() => computePricePrediction(yearlyTrends, 2), [yearlyTrends]);
 
-  // Robust Y-scale using Q1/Q3 + controlled margin so 1 extreme outlier doesn't crush the corridor
   const trendBounds = useMemo(() => {
     if (yearlyTrends.length === 0) return null;
     const lows = yearlyTrends.map((t) => t.q1PricePerSqm);
@@ -86,7 +85,6 @@ export function DvfChart({
     };
   }, [transactions]);
 
-  // Deterministic horizontal jitter per transaction inside its surface band so overlapping points separate cleanly
   const jitteredPoints = useMemo(() => {
     if (surfaceBands.length === 0) return [];
     const byBand = new Map<string, DvfTransaction[]>();
@@ -106,7 +104,6 @@ export function DvfChart({
     surfaceBands.forEach((band, bandIdx) => {
       const list = (byBand.get(band.label) ?? []).slice().sort((a, b) => a.pricePerSqm - b.pricePerSqm);
       list.forEach((tx, idx) => {
-        // Golden-ratio spiral horizontal spread inside [-0.28, +0.28] of band width
         const mod = ((idx * 0.6180339) % 1) - 0.5;
         const offsetNorm = list.length === 1 ? 0 : mod * 0.52;
         out.push({ tx, bandIdx, offsetNorm });
@@ -791,7 +788,6 @@ export function DvfChart({
             </div>
           </div>
         ) : (
-          /* Redesigned Surface Mode: Grouped surface bands (Q1-Q3 + median curve) + jittered clickable points */
           <div className="flex-1 flex flex-col justify-between">
             {surfaceBounds && surfaceBands.length > 0 && (
               <svg

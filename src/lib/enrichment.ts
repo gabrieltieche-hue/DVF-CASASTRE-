@@ -76,12 +76,12 @@ export interface FacadeRayMask {
   direction: CardinalDir;
   isCourtyard?: boolean;
   facadeLengthM: number;
-  distanceM: number | null; // null => dégagé > 100 m
+  distanceM: number | null;
   facingBuildingId: string | null;
   facingHeightM: number | null;
   facingFloors: number | null;
-  groundDeltaM?: number; // facing ground solMin - subject ground solMin (m)
-  obstructionAngleDeg: number; // Relative to floor & ground slope
+  groundDeltaM?: number;
+  obstructionAngleDeg: number;
   vegetationScreen: string | null;
 }
 
@@ -91,7 +91,7 @@ export interface PlanBuildingPolygon {
   isAdjoining: boolean;
   heightM: number;
   floors: number | null;
-  outerRings: Array<Array<[number, number]>>; // Local meters relative to subject centroid (+X East, +Y North)
+  outerRings: Array<Array<[number, number]>>;
   holeRings: Array<Array<[number, number]>>;
 }
 
@@ -128,12 +128,11 @@ export interface BdTopo3DInfo {
   altitudeMaxToitM: number | null;
   adjoiningCount: number;
   neighborCount60m: number;
-  // Principal (main longest exterior facade) vs tightest (courtyard/narrow) vs length-weighted effective setback
-  principalVisAVisDistanceM: number | null; // null => primary facade completely clear (> 100 m)
+  principalVisAVisDistanceM: number | null;
   principalFacingHeightM: number | null;
   principalDirection: CardinalDir | null;
-  effectiveVisAVisDistanceM: number | null; // length-weighted average exposure across real facades (capped at 40 m/facade)
-  closestNeighborDistanceM: number | null; // Tightest courtyard / side vis-a-vis
+  effectiveVisAVisDistanceM: number | null;
+  closestNeighborDistanceM: number | null;
   closestNeighborHeightM: number | null;
   tallestNeighborHeightM: number | null;
   maxObstructionAngleDeg: number | null;
@@ -254,10 +253,6 @@ export interface GeoPolygonFeature {
   properties?: Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
-// Analytical WGS84 (EPSG:4326) -> Lambert-93 (EPSG:2154) Metric Projection
-// IGN GRS80 LCC-2SP standard parameters
-// ---------------------------------------------------------------------------
 const L93_A = 6378137.0;
 const L93_F = 1 / 298.257222101;
 const L93_E = Math.sqrt(2 * L93_F - L93_F * L93_F);
@@ -300,10 +295,6 @@ export function wgs84ToLambert93(lat: number, lon: number): [number, number] {
   const y = L93_YS - r * Math.cos(gamma);
   return [x, y];
 }
-
-// ---------------------------------------------------------------------------
-// Metric Lambert-93 Geometry Helpers
-// ---------------------------------------------------------------------------
 
 type Pt2D = [number, number];
 
@@ -488,7 +479,6 @@ function closestVectorBetweenRings(ringA: Pt2D[], ringB: Pt2D[]): [number, numbe
   return bestVec;
 }
 
-// Ray P + t * D (t >= 0) intersection with segment A -> B; returns t or Infinity
 function raySegmentIntersectDist(
   px: number,
   py: number,
@@ -542,16 +532,12 @@ function rayMultiRingMinHit(
 }
 
 function vectorToCardinal(dx: number, dy: number): CardinalDir {
-  // In Lambert-93, +X is East, +Y is North
-  const angle = (Math.atan2(dx, dy) * 180) / Math.PI; // 0 = N, 90 = E
+  const angle = (Math.atan2(dx, dy) * 180) / Math.PI;
   const normalized = (angle + 360) % 360;
   const dirs: CardinalDir[] = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
   return dirs[Math.round(normalized / 45) % 8];
 }
 
-// ---------------------------------------------------------------------------
-// IGN BD TOPO Material Nomenclature Decoders
-// ---------------------------------------------------------------------------
 const IGN_WALL_CODE_MAP: Record<string, string> = {
   '1': 'Pierre',
   '2': 'Meulière',
@@ -574,7 +560,7 @@ export function decodeIgnMaterial(raw: string | null, kind: 'wall' | 'roof'): st
   if (!raw) return null;
   const clean = raw.trim();
   if (!clean || clean === '00' || clean === '0') return null;
-  if (!/^\d{1,2}$/.test(clean)) return clean; // Already human-readable string (e.g. 'PIERRE')
+  if (!/^\d{1,2}$/.test(clean)) return clean;
   const map = kind === 'wall' ? IGN_WALL_CODE_MAP : IGN_ROOF_CODE_MAP;
   const parts: string[] = [];
   for (const ch of clean) {
@@ -585,16 +571,6 @@ export function decodeIgnMaterial(raw: string | null, kind: 'wall' | 'roof'): st
   return parts.length > 0 ? parts.join(' / ') : null;
 }
 
-// ---------------------------------------------------------------------------
-// Parisian Thresholds & Floor-Aware Vertical Obstruction Angle
-// ---------------------------------------------------------------------------
-
-/**
- * Refined Parisian vis-a-vis thresholds:
- * - < 9 m: Vis-a-vis proche (cour étroite, impasse ou passage serré)
- * - 9–16 m: Vis-a-vis modéré (largeur de rue parisienne classique)
- * - > 16 m (or null = > 100 m): Vue dégagée (avenue, place, école ou recul sans masque proche)
- */
 export function classifyVisibility(distanceM: number | null): VisibilityCategory {
   if (distanceM === null) return 'degage';
   if (distanceM > 16) return 'degage';
@@ -602,11 +578,6 @@ export function classifyVisibility(distanceM: number | null): VisibilityCategory
   return 'proche';
 }
 
-/**
- * Vertical obstruction angle from apartment floor elevation H_appart = 0.50 + floor * 2.90
- * to facing roofline H_face + groundDeltaM at distance D:
- * Angle = arctan((H_face + groundDeltaM - H_appart) / D), clamped to 0 deg when facing roof is below floor.
- */
 export function computeObstructionAngleForFloor(
   facingHeightM: number,
   distanceM: number,
@@ -620,16 +591,12 @@ export function computeObstructionAngleForFloor(
   return Math.round((Math.atan2(deltaH, distanceM) * 180) / Math.PI);
 }
 
-// ---------------------------------------------------------------------------
-// Prepared Lambert-93 BD TOPO Buildings & Vegetation
-// ---------------------------------------------------------------------------
-
 export interface ParsedBdTopoBuilding {
   f: GeoPolygonFeature;
-  ringL93: Pt2D[]; // Largest exterior outer ring (CCW)
-  outerRingsL93: Pt2D[][]; // All exterior outer rings of MultiPolygon (CCW)
-  holeRingsL93: Pt2D[][]; // All interior courtyard holes (CW so outward normal points into courtyard)
-  allRingsL93: Pt2D[][]; // Outer (CCW) + Holes (CW)
+  ringL93: Pt2D[];
+  outerRingsL93: Pt2D[][];
+  holeRingsL93: Pt2D[][];
+  allRingsL93: Pt2D[][];
   bbox: [number, number, number, number];
   centroidL93: Pt2D;
   heightM: number;
@@ -655,11 +622,9 @@ function sanitizeBdTopoHeight(
   sourceIds: string
 ): number {
   let heightM = Number.isFinite(rawH) && rawH > 0 ? rawH : 0;
-  // Estimate ONLY when BD TOPO literally has height = 0 / missing (never override valid measured courtyard roof heights like 4.1m!)
   if (heightM <= 0 && floors !== null && floors >= 1) {
     heightM = Math.round(floors * 3.0 * 10) / 10;
   }
-  // ANFR telecom antenna masts pasted onto rooftop height when no residential floor count exists
   if ((sourceIds.startsWith('ANFR') || heightM > 45) && floors === null) {
     heightM = 21;
   }
@@ -717,7 +682,6 @@ export function prepareBdTopoFeatures(features: GeoPolygonFeature[]): ParsedBdTo
         : null;
     const sourceIds = typeof props.identifiants_sources === 'string' ? props.identifiants_sources : '';
     const heightM = sanitizeBdTopoHeight(rawH, rawFloors, sourceIds);
-    // Avoid parcel-inherited 5-floor tags on physically 1-story (< 6 m) annexes/sheds
     const floors =
       rawH > 0 && rawH < 6 && rawFloors !== null && rawFloors >= 2
         ? Math.max(1, Math.round(rawH / 3))
@@ -806,10 +770,6 @@ export function computeBdTopoVisAVisFromPrepared(
 
   const [tx, ty] = wgs84ToLambert93(targetLat, targetLon);
 
-  // Locate subject building preferring residential-scale buildings (>= 6 m):
-  // 1) Point inside polygon (excluding interior courtyard holes)
-  // 2) Closest exterior facade within 25 m (BAN address coordinates often lie on the sidewalk)
-  // 3) Nearest centroid fallback
   let insideResIdx = -1;
   let insideResHeight = -1;
   let insideAnyIdx = -1;
@@ -855,7 +815,6 @@ export function computeBdTopoVisAVisFromPrepared(
   let subjectIdx = insideResIdx;
   if (subjectIdx === -1) {
     if (insideAnyIdx !== -1 && insideAnyHeight >= 3.5) {
-      // Point is genuinely inside a built structure >= 3.5m: only prefer a >=6m building if it directly touches/overlaps within 3.5m
       subjectIdx =
         bestResEdgeIdx !== -1 && bestResEdgeDist <= 3.5 ? bestResEdgeIdx : insideAnyIdx;
     } else if (bestResEdgeIdx !== -1 && bestResEdgeDist <= 25) {
@@ -876,9 +835,6 @@ export function computeBdTopoVisAVisFromPrepared(
   const toStr = (v: unknown): string | null =>
     typeof v === 'string' && v.trim() ? v.trim() : null;
 
-  // Candidate neighboring main buildings within 100 m ray horizon.
-  // CRITICAL: Do NOT exclude touching buildings (edgeDist <= 1.8) from candidateNeighbors,
-  // because L/U-shaped neighbors sharing one corner often face across the courtyard 10–30 m away!
   const [sMinX, sMinY, sMaxX, sMaxY] = subject.bbox;
   const MAX_RAY = 100;
   const minPartyWallH = Math.max(8, subject.heightM * 0.55);
@@ -889,7 +845,7 @@ export function computeBdTopoVisAVisFromPrepared(
   for (let i = 0; i < parsed.length; i++) {
     if (i === subjectIdx) continue;
     const nb = parsed[i];
-    if (nb.heightM < 3.5) continue; // Skip low courtyard sheds/garages < 3.5 m
+    if (nb.heightM < 3.5) continue;
     const [nMinX, nMinY, nMaxX, nMaxY] = nb.bbox;
     if (
       nMaxX < sMinX - MAX_RAY ||
@@ -909,7 +865,6 @@ export function computeBdTopoVisAVisFromPrepared(
     }
   }
 
-  // Candidate vegetation zones within 100 m
   const candidateVeg = vegetation.filter((v) => {
     const [vMinX, vMinY, vMaxX, vMaxY] = v.bbox;
     return !(
@@ -920,7 +875,6 @@ export function computeBdTopoVisAVisFromPrepared(
     );
   });
 
-  // Step 2: Facade-by-facade decomposition across ALL outer + interior courtyard hole rings
   const effectiveSubjFloors =
     subject.floors ?? (subject.heightM > 0 ? Math.max(2, Math.round(subject.heightM / 3.0)) : null);
   const evalFloor =
@@ -944,12 +898,10 @@ export function computeBdTopoVisAVisFromPrepared(
       const segLen = Math.hypot(segDx, segDy);
       if (segLen < 1.5) continue;
 
-      // In CCW outer rings and CW courtyard holes, (segDy/segLen, -segDx/segLen) always points toward open air
       const nx = segDy / segLen;
       const ny = -segDx / segLen;
       const dir = vectorToCardinal(nx, ny);
 
-      // Dense sampling along facade: 5 samples (< 10 m), 7 samples (10-20 m), 9 samples (> 20 m)
       const nSamples = segLen >= 20 ? 9 : segLen >= 10 ? 7 : 5;
       const sampleFracs: number[] = [];
       for (let s = 0; s < nSamples; s++) {
@@ -965,7 +917,6 @@ export function computeBdTopoVisAVisFromPrepared(
         const px = ax + segDx * frac + nx * 0.35;
         const py = ay + segDy * frac + ny * 0.35;
 
-        // Check whether this sample point sits against a blind full-height mitoyen party wall
         let isSampleMitoyen = false;
         for (const nb of candidateNeighbors) {
           if (nb.heightM < minPartyWallH) continue;
@@ -988,7 +939,6 @@ export function computeBdTopoVisAVisFromPrepared(
           const rdx = nx * Math.cos(rad) - ny * Math.sin(rad);
           const rdy = nx * Math.sin(rad) + ny * Math.cos(rad);
 
-          // 1) Ray vs external neighboring buildings (minDist = 0.8 skips touching corner vertices at t ≈ 0)
           for (const nb of candidateNeighbors) {
             const hit = rayMultiRingMinHit(px, py, rdx, rdy, nb.allRingsL93, MAX_RAY, 0.8);
             if (hit < sampleClosest) {
@@ -997,8 +947,6 @@ export function computeBdTopoVisAVisFromPrepared(
             }
           }
 
-          // 2) Self-intersection against U/L-shaped wings & opposite courtyard walls:
-          // restrict to tight [-5..+5] deg on exterior rings with minDist >= 1.8m to avoid L-corner chamfer noise
           if (isHoleRing || Math.abs(deg) <= 5) {
             const minSelf = isHoleRing ? 0.8 : 1.8;
             const selfHit = rayMultiRingMinHit(px, py, rdx, rdy, subject.allRingsL93, MAX_RAY, minSelf);
@@ -1025,14 +973,11 @@ export function computeBdTopoVisAVisFromPrepared(
         }
       }
 
-      // Skip segment only if >= 60% of sample points are blind party walls
       if (partyWallHits >= Math.ceil(sampleFracs.length * 0.6)) {
         continue;
       }
 
       const openSampleCount = Math.max(1, sampleFracs.length - partyWallHits);
-      // Require at least 25% of open samples (min 1) to hit an obstructing building within 100 m
-      // so we NEVER erase a real neighbor covering part of a facade (nor exaggerate a 1-ray corner graze)
       let distM: number | null = null;
       let repNeighbor: ParsedBdTopoBuilding | null = null;
       if (sampleHits.length >= Math.max(1, Math.ceil(openSampleCount * 0.25))) {
@@ -1059,8 +1004,6 @@ export function computeBdTopoVisAVisFromPrepared(
     }
   }
 
-  // Aggregate edges per (direction, exterior vs courtyard) weighted by facade length.
-  // Keep every facade >= 2.5m (only drop tiny sub-2.5m recess notches when major straight walls >= 6m exist).
   const dirFacades = new Map<string, FacadeRayMask>();
   const dirEdgeMeta = new Map<string, RawEdgeMeasurement>();
 
@@ -1080,8 +1023,6 @@ export function computeBdTopoVisAVisFromPrepared(
     let facingBuildingId: string | null = null;
     let groundDeltaM = 0;
 
-    // Report real obstruction whenever at least 15% of the directional linear facade hits a neighbor
-    // (eliminates the old <40% false ">100 m" bug!)
     if (obstructed.length > 0 && obstructedLen >= totalLen * 0.15) {
       distM =
         Math.round(
@@ -1130,7 +1071,6 @@ export function computeBdTopoVisAVisFromPrepared(
     });
   }
 
-  // Pick Principal Facade: longest exterior facade (tie-breaker: more open distance)
   const significantPool = Array.from(dirFacades.values()).filter((f) => f.facadeLengthM >= 2.5);
   const openFacadePool = significantPool.length > 0 ? significantPool : Array.from(dirFacades.values());
   const exteriorPool = openFacadePool.filter((f) => !f.isCourtyard);
@@ -1147,7 +1087,6 @@ export function computeBdTopoVisAVisFromPrepared(
         })[0]
       : openFacadePool[0] ?? null;
 
-  // Sort facades so principal is first, then exterior by length desc, then courtyards
   const facades = Array.from(dirFacades.values()).sort((a, b) => {
     if (principalCandidate) {
       const aP = a === principalCandidate ? 1 : 0;
@@ -1160,7 +1099,6 @@ export function computeBdTopoVisAVisFromPrepared(
     return b.facadeLengthM - a.facadeLengthM;
   });
 
-  // Build nearestNeighbors list from distinct obstructing buildings on non-mitoyen facades + nearby candidates
   const neighborMaskMap = new Map<string, NeighborBuildingMask>();
   for (const fac of facades) {
     if (fac.distanceM === null || !fac.facingBuildingId || fac.facingHeightM === null) continue;
@@ -1180,7 +1118,6 @@ export function computeBdTopoVisAVisFromPrepared(
     }
   }
 
-  // Include surrounding non-mitoyen buildings (< 60 m) using closest perimeter vector (not centroids)
   for (let i = 0; i < candidateNeighbors.length; i++) {
     const nb = candidateNeighbors[i];
     if (adjoiningSet.has(nb)) continue;
@@ -1214,7 +1151,6 @@ export function computeBdTopoVisAVisFromPrepared(
   const principalFacingHeightM = principalCandidate ? principalCandidate.facingHeightM : null;
   const principalDirection = principalCandidate ? principalCandidate.direction : null;
 
-  // Tightest obstructed facade among significant non-mitoyen facades
   const obstructedFacades = openFacadePool
     .filter((f): f is FacadeRayMask & { distanceM: number } => f.distanceM !== null)
     .sort((a, b) => a.distanceM - b.distanceM);
@@ -1227,7 +1163,6 @@ export function computeBdTopoVisAVisFromPrepared(
     ? tightestFacade.facingHeightM
     : nearestNeighbors[0]?.heightM ?? null;
 
-  // Length-weighted effective vis-a-vis distance across main facades (each open facade capped at 40 m)
   let effectiveVisAVisDistanceM: number | null = null;
   if (openFacadePool.length > 0) {
     const totalW = openFacadePool.reduce((s, f) => s + f.facadeLengthM, 0);
@@ -1254,7 +1189,6 @@ export function computeBdTopoVisAVisFromPrepared(
         )
       : nearestNeighbors[0]?.obstructionAngleDeg ?? null;
 
-  // Count distinct open cardinal directions (avoid double-counting courtyard notches or sub-segments)
   const openDirsSet = new Set(
     openFacadePool
       .filter((f) => f.distanceM === null || f.distanceM >= 10 || f.obstructionAngleDeg < 45)
@@ -1262,7 +1196,6 @@ export function computeBdTopoVisAVisFromPrepared(
   );
   const openDirectionsCount = openFacadePool.length > 0 ? openDirsSet.size : 4;
 
-  // Length-weighted sky openness % across open facades
   let skyOpennessPct: number | null = null;
   if (openFacadePool.length > 0) {
     const totalW = openFacadePool.reduce((s, f) => s + f.facadeLengthM, 0);
@@ -1284,7 +1217,6 @@ export function computeBdTopoVisAVisFromPrepared(
 
   const vegetationScreensCount = openFacadePool.filter((f) => Boolean(f.vegetationScreen)).length;
 
-  // Classify visibility consistently using length-weighted effective vis-a-vis across facades
   const classificationDist =
     effectiveVisAVisDistanceM !== null
       ? effectiveVisAVisDistanceM
@@ -1292,7 +1224,6 @@ export function computeBdTopoVisAVisFromPrepared(
       ? principalDist
       : closestDist;
 
-  // Build local-meter 2D Plan View geometry when requested (for drawer visual verification)
   let planView: BdTopoPlanView | undefined;
   if (options?.includePlanView) {
     const [cx, cy] = subject.centroidL93;
@@ -1444,16 +1375,12 @@ export function computeNaturalLuminosityScore(
       : principalDist * 0.65 + closestDist * 0.35;
   const openDirs = bdTopo?.openDirectionsCount ?? 2;
 
-  // 1) Sky openness across facades (max 55 pts)
   const skyContribution = Math.round((Math.min(100, Math.max(0, skyPct)) / 100) * 55);
-  // 2) Parisian facade setback distance (max 25 pts, plateaus around 18 m)
   const distanceContribution = Math.round((Math.min(18, Math.max(0, effectiveDist)) / 18) * 25);
-  // 3) Multi-facade exposure / traversant bonus (max 20 pts)
   const isTraversantBdnb =
     bdnb?.traversing?.toLowerCase().includes('traversant') &&
     !bdnb.traversing.toLowerCase().includes('non');
 
-  // Count distinct exterior or genuinely open (>= 7m) facades so tight courtyard notches never inflate "Ouvert sur N façades"
   const distinctExteriorDirs = bdTopo
     ? new Set(
         bdTopo.facades

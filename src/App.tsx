@@ -38,16 +38,13 @@ export default function App() {
   );
   const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState<boolean>(false);
 
-  // Instant client-side sub-filters on the extracted result
   const [roomFilter, setRoomFilter] = useState<RoomFilter>('all');
   const [visibilityFilter, setVisibilityFilter] = useState<'all' | VisibilityCategory>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Sector 3D visibility & luminosity analysis (IGN BD TOPO batch)
   const [sectorEnv, setSectorEnv] = useState<SectorEnvironmentSummary | null>(null);
   const [envLoading, setEnvLoading] = useState<boolean>(false);
 
-  // Side-by-side comparison state (max 2 transactions)
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState<boolean>(false);
 
@@ -120,7 +117,6 @@ export default function App() {
     runExtraction(DEFAULT_FORM_STATE);
   }, [runExtraction]);
 
-  // Fetch batch IGN BD TOPO 3D vis-a-vis & luminosity summary for extracted transactions
   useEffect(() => {
     if (!result || result.transactions.length === 0) {
       setSectorEnv(null);

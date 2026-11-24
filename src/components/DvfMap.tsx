@@ -174,8 +174,6 @@ export function DvfMap({
     ? { lat: center.latitude, lng: center.longitude }
     : { lat: 48.833676, lng: 2.294779 };
 
-  // Compute small deterministic offsets for apartments in the exact same building
-  // Note: Use plain Record<string, number> instead of global Map constructor (avoiding JSX Map shadowing)
   const coordCounts: Record<string, number> = {};
   const positionedTxs = transactions.map((tx) => {
     const key = `${tx.latitude.toFixed(6)},${tx.longitude.toFixed(6)}`;
